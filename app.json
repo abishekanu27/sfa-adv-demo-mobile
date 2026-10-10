@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "SoftAir SFA",
+    "slug": "softair-sfa",
+    "scheme": "softair-sfa",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/SoftAir_SFA.png",
+    "plugins": [
+      "react-native-thermal-printer-driver"
+    ],
+    "android": {
+      "package": "com.softair.sfa",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/SoftAir_SFA.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.softair.sfa",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "SoftAir SFA connects directly to Posiflow and Bluetooth thermal receipt printers to print customer bills without third-party apps.",
+        "NSBluetoothPeripheralUsageDescription": "SoftAir SFA connects directly to Posiflow and Bluetooth thermal receipt printers to print customer bills without third-party apps."
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d174c818-87ed-4b08-ada6-efea31c97fa1"
+      }
+    },
+    "owner": "softair-soultions"
+  }
+}
