@@ -536,45 +536,88 @@ export function formatInvoiceItemRow(
   rate: number,
   amount: number,
   width: number = 44,
-  mrp?: number
+  hasGst: boolean = false,
+  gstRate: number = 0,
+  taxable: number = 0
 ): string[] {
   const is80 = width >= 40;
   const cleanUnit = sanitizeAscii(unit || 'Pcs');
-  const effectiveMrp = mrp !== undefined && mrp > 0 ? mrp : rate;
 
-  if (is80) {
-    // 80mm: Wrap long item description at 10 characters and shift columns left
-    const wrappedNameLines = wrapTextByLength(itemName, 10);
-    const idxStr = `${index}`.padEnd(2, ' ').slice(0, 2);
-    const firstChunk = (wrappedNameLines[0] || '').padEnd(10, ' ').slice(0, 10);
-    const qtyStr = `${qty}`.padStart(3, ' ');
-    const unitStr = cleanUnit.slice(0, 3).padEnd(3, ' ');
-    const mrpStr = effectiveMrp.toFixed(2).padStart(7, ' ');
-    const rateStr = rate.toFixed(2).padStart(7, ' ');
-    const amtStr = amount.toFixed(2).padStart(8, ' ');
+  if (hasGst) {
+    if (is80) {
+      // 80mm Tax Invoice:
+      // # (2) + Item (7) + gap (1) + QTY (3) + gap (1) + UNT (3) + gap (1) + GST (3) + gap (1) + Taxable (7) + gap (1) + RATE (6) + gap (1) + TOTAL (7) = 44 chars
+      const wrappedNameLines = wrapTextByLength(itemName, 7);
+      const idxStr = `${index}`.padEnd(2, ' ').slice(0, 2);
+      const firstChunk = (wrappedNameLines[0] || '').padEnd(7, ' ').slice(0, 7);
+      const qtyStr = `${qty}`.padStart(3, ' ').slice(0, 3);
+      const unitStr = cleanUnit.slice(0, 3).padEnd(3, ' ');
+      const gstStr = `${gstRate}%`.padStart(3, ' ').slice(0, 3);
+      const taxStr = taxable.toFixed(2).padStart(7, ' ').slice(0, 7);
+      const rateStr = rate.toFixed(2).padStart(6, ' ').slice(0, 6);
+      const amtStr = amount.toFixed(2).padStart(7, ' ').slice(0, 7);
 
-    // 2 (#) + 10 (Item) + 1 + 3 (QTY) + 1 + 3 (UNT) + 1 + 7 (MRP) + 1 + 7 (RATE) + 1 + 8 (TOTAL) = 44 chars safely within 80mm buffer
-    const line1 = `${idxStr}${firstChunk} ${qtyStr} ${unitStr} ${mrpStr} ${rateStr} ${amtStr}`;
-    const lines = [line1];
+      const line1 = `${idxStr}${firstChunk} ${qtyStr} ${unitStr} ${gstStr} ${taxStr} ${rateStr} ${amtStr}`;
+      const lines = [line1];
 
-    // Wrapped product descriptions remain aligned under Item column (# indent of 2 chars)
-    for (let i = 1; i < wrappedNameLines.length; i++) {
-      lines.push('  ' + wrappedNameLines[i]);
+      for (let i = 1; i < wrappedNameLines.length; i++) {
+        lines.push('  ' + wrappedNameLines[i]);
+      }
+      return lines;
+    } else {
+      // 58mm Tax Invoice
+      const prefix = `${index}. `;
+      const wrappedNameLines = wrapTextByLength(itemName, 16);
+      const lines: string[] = [prefix + (wrappedNameLines[0] || '')];
+      for (let i = 1; i < wrappedNameLines.length; i++) {
+        lines.push('   ' + wrappedNameLines[i]);
+      }
+
+      const qtyUnitGst = `   ${qty} ${cleanUnit} GST:${gstRate}%`;
+      const taxRateAmt = `Tax:${taxable.toFixed(1)} @${rate.toFixed(1)} Rs.${amount.toFixed(1)}`;
+      const spaces = Math.max(1, 32 - qtyUnitGst.length - taxRateAmt.length);
+      if (qtyUnitGst.length + taxRateAmt.length + 1 <= 32) {
+        lines.push(qtyUnitGst + ' '.repeat(spaces) + taxRateAmt);
+      } else {
+        lines.push(qtyUnitGst);
+        lines.push(`   Tax:${taxable.toFixed(1)} Rate:${rate.toFixed(1)} Tot:${amount.toFixed(1)}`);
+      }
+      return lines;
     }
-    return lines;
   } else {
-    const prefix = `${index}. `;
-    const wrappedNameLines = wrapTextByLength(itemName, 16);
-    const lines: string[] = [prefix + (wrappedNameLines[0] || '')];
-    for (let i = 1; i < wrappedNameLines.length; i++) {
-      lines.push('   ' + wrappedNameLines[i]);
-    }
+    // Non-Tax Invoice (Estimate: remove only MRP)
+    if (is80) {
+      // 80mm: # (2) + Item (17) + gap (1) + QTY (3) + gap (1) + UNT (3) + gap (1) + RATE (7) + gap (1) + TOTAL (8) = 44 chars
+      const wrappedNameLines = wrapTextByLength(itemName, 17);
+      const idxStr = `${index}`.padEnd(2, ' ').slice(0, 2);
+      const firstChunk = (wrappedNameLines[0] || '').padEnd(17, ' ').slice(0, 17);
+      const qtyStr = `${qty}`.padStart(3, ' ');
+      const unitStr = cleanUnit.slice(0, 3).padEnd(3, ' ');
+      const rateStr = rate.toFixed(2).padStart(7, ' ');
+      const amtStr = amount.toFixed(2).padStart(8, ' ');
 
-    const qtyUnitMrp = `   ${qty} ${cleanUnit} MRP:${effectiveMrp.toFixed(1)}`;
-    const rateAmt = `@${rate.toFixed(1)} Rs.${amount.toFixed(1)}`;
-    const spaces = Math.max(1, 32 - qtyUnitMrp.length - rateAmt.length);
-    lines.push(qtyUnitMrp + ' '.repeat(spaces) + rateAmt);
-    return lines;
+      const line1 = `${idxStr}${firstChunk} ${qtyStr} ${unitStr} ${rateStr} ${amtStr}`;
+      const lines = [line1];
+
+      for (let i = 1; i < wrappedNameLines.length; i++) {
+        lines.push('  ' + wrappedNameLines[i]);
+      }
+      return lines;
+    } else {
+      // 58mm Estimate
+      const prefix = `${index}. `;
+      const wrappedNameLines = wrapTextByLength(itemName, 16);
+      const lines: string[] = [prefix + (wrappedNameLines[0] || '')];
+      for (let i = 1; i < wrappedNameLines.length; i++) {
+        lines.push('   ' + wrappedNameLines[i]);
+      }
+
+      const qtyUnit = `   ${qty} ${cleanUnit}`;
+      const rateAmt = `@${rate.toFixed(1)} Rs.${amount.toFixed(1)}`;
+      const spaces = Math.max(1, 32 - qtyUnit.length - rateAmt.length);
+      lines.push(qtyUnit + ' '.repeat(spaces) + rateAmt);
+      return lines;
+    }
   }
 }
 
@@ -716,23 +759,39 @@ export function buildInvoiceEscPosNodes(data: MobileInvoiceData, paperSize: '58m
 
   nodes.push(text('-'.repeat(totalChars)));
 
-  // 3. Line Items Table Header (Matching strictly 44 chars to prevent wrapping)
-  // 80mm: # (2) + Item (10) + gap (1) + QTY (3) + gap (1) + UNT (3) + gap (1) + MRP (7) + gap (1) + RATE (7) + gap (1) + TOTAL (8) = 44 chars
-  if (is80) {
-    const hIdx = '# ';
-    const hItem = 'Item'.padEnd(10, ' ');
-    const hQty = 'QTY';
-    const hUnit = 'UNT';
-    const hMrp = '    MRP';
-    const hRate = '   RATE';
-    const hAmt = '   TOTAL';
-    nodes.push(text(`${hIdx}${hItem} ${hQty} ${hUnit} ${hMrp} ${hRate} ${hAmt}`));
+  // 3. Line Items Table Header
+  if (hasGst) {
+    if (is80) {
+      // 80mm: # (2) + Item (7) + gap (1) + QTY (3) + gap (1) + UNT (3) + gap (1) + GST (3) + gap (1) + Taxable (7) + gap (1) + RATE (6) + gap (1) + TOTAL (7) = 44 chars
+      const hIdx = '# ';
+      const hItem = 'Item'.padEnd(7, ' ');
+      const hQty = 'QTY';
+      const hUnit = 'UNT';
+      const hGst = 'GST';
+      const hTax = 'Taxable';
+      const hRate = '  Rate';
+      const hAmt = '  Total';
+      nodes.push(text(`${hIdx}${hItem} ${hQty} ${hUnit} ${hGst} ${hTax} ${hRate} ${hAmt}`));
+    } else {
+      nodes.push(text('#  Item      QTY UNT GST Tax Tot'));
+    }
   } else {
-    nodes.push(text('#  Item       QTY UNT MRP Rate Tot'));
+    if (is80) {
+      // 80mm: # (2) + Item (17) + gap (1) + QTY (3) + gap (1) + UNT (3) + gap (1) + RATE (7) + gap (1) + TOTAL (8) = 44 chars
+      const hIdx = '# ';
+      const hItem = 'Item'.padEnd(17, ' ');
+      const hQty = 'QTY';
+      const hUnit = 'UNT';
+      const hRate = '   RATE';
+      const hAmt = '   TOTAL';
+      nodes.push(text(`${hIdx}${hItem} ${hQty} ${hUnit} ${hRate} ${hAmt}`));
+    } else {
+      nodes.push(text('#  Item       QTY UNT Rate Total'));
+    }
   }
   nodes.push(text('-'.repeat(totalChars)));
 
-  // Items Rows with Requested Format: # | Item (up to 13 chars) | QTY | UNIT | MRP | Rate | Total
+  // Items Rows with Requested Format
   (data.items || []).forEach((item, idx) => {
     const qty = Number(item.qty) || 1;
     const rate = Number(item.unit_price) || 0;
@@ -740,9 +799,18 @@ export function buildInvoiceEscPosNodes(data: MobileInvoiceData, paperSize: '58m
     const rawUnit = item.unit || item.package_type || 'Pcs';
     const unit = rawUnit.toLowerCase() === 'loose' ? 'Bag' : rawUnit;
     const itemTitle = formatItemTitle(item);
-    const mrp = Number(item.mrp) > 0 ? Number(item.mrp) : rate;
+    const gstRate = item.gst_rate != null ? Number(item.gst_rate) : (hasGst ? 18 : 0);
 
-    const rows = formatInvoiceItemRow(idx + 1, itemTitle, qty, unit, rate, amount, totalChars, mrp);
+    let taxable = amount;
+    if (hasGst && gstRate > 0) {
+      if (item.taxable_amount != null && Number(item.taxable_amount) < amount && Number(item.taxable_amount) > 0) {
+        taxable = Number(item.taxable_amount);
+      } else {
+        taxable = Math.round((amount / (1 + gstRate / 100)) * 100) / 100;
+      }
+    }
+
+    const rows = formatInvoiceItemRow(idx + 1, itemTitle, qty, unit, rate, amount, totalChars, hasGst, gstRate, taxable);
     rows.forEach(r => nodes.push(text(r)));
   });
 

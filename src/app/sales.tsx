@@ -44,6 +44,10 @@ import {
   CompanyProfile,
   getProductSellingPrices,
   ProductSellingPriceRecord,
+  evaluateLocalSchemes,
+  FreeSchemeItem,
+  QualifiedSchemeItem,
+  SchemeEvaluationResult,
 } from '../database/db';
 import { syncCompanyProfile } from '../database/sync';
 import InvoicePreviewContent from '../components/InvoicePreviewContent';
@@ -104,6 +108,9 @@ export default function Sales() {
   const [itemDiscountTypes, setItemDiscountTypes] = useState<{ [key: string]: 'amount' | 'percent' }>({});
   const [customAdvance, setCustomAdvance] = useState('');
   const [notes, setNotes] = useState('');
+  const [acceptedFreeRewards, setAcceptedFreeRewards] = useState<{ [schemeId: number]: FreeSchemeItem }>({});
+  const [acceptedDiscountSchemes, setAcceptedDiscountSchemes] = useState<{ [schemeId: number]: boolean }>({});
+  const [isSchemeBannerMinimized, setIsSchemeBannerMinimized] = useState(false);
 
   // Invoice Preview / Print modal state
   const [companyProfile, setCompanyProfileState] = useState<CompanyProfile>(getCompanyProfile());
@@ -207,6 +214,9 @@ export default function Sales() {
     setItemDiscountTypes({});
     setCustomAdvance('');
     setNotes('');
+    setAcceptedFreeRewards({});
+    setAcceptedDiscountSchemes({});
+    setIsSchemeBannerMinimized(false);
     setStockSearch('');
     setWarehouseFilter('All Warehouses');
     setModalStep('form');
@@ -594,6 +604,19 @@ export default function Sales() {
     let totalLoose = 0;
     let subtotalGross = 0;
     let totalDiscount = 0;
+    const cartItemsForScheme: Array<{
+      product_id: string | number;
+      product_name: string;
+      qty: number;
+      bag_qty: number;
+      loose_qty: number;
+      package_type: string;
+      unit: string;
+      unit_price: number;
+      rate: number;
+      total: number;
+      items_per_package: number;
+    }> = [];
 
     for (const stock of activeStockList) {
       const key = getStockKey(stock);
@@ -604,23 +627,120 @@ export default function Sales() {
         const bagRate = getProductBagRate(stock);
         const lineGross = (looseQty * looseRate) + (bagQty * bagRate);
         const discInfo = getItemDiscountInfo(stock, lineGross);
+        const itemsPerPkg = Math.max(1, Number(stock.items_per_package) || 1);
+        const totalPieces = (bagQty * itemsPerPkg) + looseQty;
+
         totalUnits += (looseQty + bagQty);
         totalBags += bagQty;
         totalLoose += looseQty;
         subtotalGross += lineGross;
         totalDiscount += discInfo.discAmt;
+
+        cartItemsForScheme.push({
+          product_id: stock.product_id != null && String(stock.product_id).trim() !== '' ? stock.product_id : (stock.id ? String(stock.id).replace('ord_prod_', '') : ''),
+          product_name: stock.product_name,
+          qty: totalPieces,
+          bag_qty: bagQty,
+          loose_qty: looseQty,
+          package_type: resolveStockPackageType(stock),
+          unit: resolveStockUnitLabel(stock),
+          unit_price: looseRate,
+          rate: looseRate,
+          total: lineGross,
+          items_per_package: itemsPerPkg,
+        });
       }
     }
 
-    const netBeforeRound = Math.max(0, subtotalGross - totalDiscount);
+    const rawSchemeEval = evaluateLocalSchemes(cartItemsForScheme, subtotalGross);
+    const qualifiedSchemes = rawSchemeEval?.qualifiedSchemes || [];
+    const qualifiedSchemeIdSet = new Set(qualifiedSchemes.map(qs => qs.scheme_id));
+
+    // Calculate scheme discount only for schemes that the user has explicitly activated
+    const schemeDiscount = qualifiedSchemes.reduce((sum, qs) => {
+      if (qs.reward_type === 'DISCOUNT' && acceptedDiscountSchemes[qs.scheme_id]) {
+        return sum + (Number(qs.discount_amount) || 0);
+      }
+      return sum;
+    }, 0);
+
+    const activeFreeItems = (rawSchemeEval?.freeItems || []).filter(
+      fi => fi.scheme_id != null && Boolean(acceptedFreeRewards[fi.scheme_id]) && qualifiedSchemeIdSet.has(fi.scheme_id)
+    );
+
+    const schemeEval: SchemeEvaluationResult = {
+      ...rawSchemeEval,
+      qualifiedSchemes,
+      freeItems: activeFreeItems,
+      totalDiscount: schemeDiscount,
+    };
+    const combinedDiscount = totalDiscount + schemeDiscount;
+
+    const netBeforeRound = Math.max(0, subtotalGross - combinedDiscount);
     // Automatic, non-editable round off
     const totalAmount = Math.round(netBeforeRound);
     const roundOff = Math.round((totalAmount - netBeforeRound) * 100) / 100;
 
-    return { totalUnits, totalBags, totalLoose, subtotalGross, totalDiscount, netBeforeRound, roundOff, totalAmount };
+    return {
+      totalUnits,
+      totalBags,
+      totalLoose,
+      subtotalGross,
+      totalDiscount: combinedDiscount,
+      manualDiscount: totalDiscount,
+      schemeDiscount,
+      schemeEval,
+      netBeforeRound,
+      roundOff,
+      totalAmount,
+    };
   };
 
-  const { totalUnits, totalBags, totalLoose, subtotalGross, totalDiscount, netBeforeRound, roundOff, totalAmount } = calculateBill();
+  const {
+    totalUnits,
+    totalBags,
+    totalLoose,
+    subtotalGross,
+    totalDiscount,
+    manualDiscount,
+    schemeDiscount,
+    schemeEval,
+    netBeforeRound,
+    roundOff,
+    totalAmount,
+  } = calculateBill();
+
+  const handleAddFreeReward = (scheme: QualifiedSchemeItem) => {
+    if (scheme.freeItem) {
+      setAcceptedFreeRewards(prev => ({
+        ...prev,
+        [scheme.scheme_id]: scheme.freeItem!,
+      }));
+    }
+  };
+
+  const handleRemoveFreeReward = (schemeId: number) => {
+    setAcceptedFreeRewards(prev => {
+      const copy = { ...prev };
+      delete copy[schemeId];
+      return copy;
+    });
+  };
+
+  const handleApplyDiscountScheme = (schemeId: number) => {
+    setAcceptedDiscountSchemes(prev => ({
+      ...prev,
+      [schemeId]: true,
+    }));
+  };
+
+  const handleRemoveDiscountScheme = (schemeId: number) => {
+    setAcceptedDiscountSchemes(prev => {
+      const copy = { ...prev };
+      delete copy[schemeId];
+      return copy;
+    });
+  };
 
   const selectedProductCount = activeStockList.filter(s => {
     const k = getStockKey(s);
@@ -774,6 +894,34 @@ export default function Sales() {
         }
       }
     }
+
+    // Include accepted free scheme rewards in invoice preview & print
+    const qualifiedSchemeIdSet = new Set(schemeEval?.qualifiedSchemes.map(qs => qs.scheme_id) || []);
+    Object.entries(acceptedFreeRewards).forEach(([sIdStr, freeItem]) => {
+      if (!qualifiedSchemeIdSet.has(Number(sIdStr))) return;
+      itemsToInvoice.push({
+        product_id: freeItem.product_id ? String(freeItem.product_id) : '',
+        product_name: `${freeItem.product_name} (Free Scheme Reward)`,
+        product_sku: freeItem.product_sku || '',
+        hsn_code: '',
+        package_type: freeItem.package_type || 'Loose',
+        unit: freeItem.unit || 'Pcs',
+        qty: freeItem.qty,
+        unit_price: 0,
+        mrp: 0,
+        discount: 0,
+        discount_amount: 0,
+        total: 0,
+        gst_rate: 0,
+        cgst_rate: 0,
+        sgst_rate: 0,
+        cgst_amount: 0,
+        sgst_amount: 0,
+        total_gst: 0,
+        taxable_amount: 0,
+        items_per_package: 1,
+      });
+    });
 
     if (itemsToInvoice.length === 0) {
       return null;
@@ -1135,6 +1283,42 @@ export default function Sales() {
         }
       }
 
+      // Append any accepted promotional scheme free reward items that are currently qualified
+      const qualifiedSchemeIdSet = new Set(schemeEval?.qualifiedSchemes.map(qs => qs.scheme_id) || []);
+      Object.entries(acceptedFreeRewards).forEach(([sIdStr, freeItem]) => {
+        if (!qualifiedSchemeIdSet.has(Number(sIdStr))) return;
+        selectedItems.push({
+          product_id: freeItem.product_id ? String(freeItem.product_id) : '',
+          product_name: `${freeItem.product_name} (Free Scheme Reward)`,
+          product_sku: freeItem.product_sku || '',
+          hsn_code: '',
+          warehouse_name: (activeStockList[0] as any)?.warehouse_name || '',
+          warehouse_id: (activeStockList[0] as any)?.warehouse_id || '',
+          package_type: freeItem.package_type || 'Loose',
+          unit: freeItem.unit || 'Pcs',
+          gst_rate: '0%',
+          cgst_rate: 0,
+          sgst_rate: 0,
+          cgst_amount: 0,
+          sgst_amount: 0,
+          total_gst: 0,
+          taxable_amount: 0,
+          qty: freeItem.qty,
+          unit_price: 0,
+          mrp: 0,
+          discount: 0,
+          discount_amount: 0,
+          total: 0,
+          items_per_package: 1,
+          total_pieces: freeItem.qty,
+        });
+
+        // "and the stock from Van need to reduced."
+        if (saleType === 'sale') {
+          deductVanStock(freeItem.product_id || freeItem.product_name, freeItem.qty);
+        }
+      });
+
       if (selectedItems.length === 0) {
         Alert.alert('No Items Selected', 'Please select at least 1 item.');
         return;
@@ -1184,7 +1368,9 @@ export default function Sales() {
       setItemDiscounts({});
       setItemDiscountTypes({});
       setCustomAdvance('');
-      setNotes('');
+      setAcceptedFreeRewards({});
+      setAcceptedDiscountSchemes({});
+      setIsSchemeBannerMinimized(false);
       setStockSearch('');
       loadData();
       sendImmediateLocationPing().catch(() => {});
@@ -4058,6 +4244,176 @@ export default function Sales() {
 
             {/* Bottom Static Area: Selected Quantity Box and Confirm Button (Elevated slightly upward) */}
             <View style={{ paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 20 : 16, borderTopWidth: 1, borderTopColor: '#e2e8f0', backgroundColor: '#ffffff' }}>
+              {/* Trade Offer Qualified Highlight Banner (Collapsible to prevent covering stock list) */}
+              {schemeEval?.qualifiedSchemes && schemeEval.qualifiedSchemes.length > 0 && (
+                <View className="mb-2">
+                  {isSchemeBannerMinimized ? (
+                    /* Minimized Pill Bar - Takes minimal height (~32px), keeps all active schemes intact */
+                    <TouchableOpacity
+                      onPress={() => setIsSchemeBannerMinimized(false)}
+                      activeOpacity={0.8}
+                      style={{
+                        backgroundColor: '#ecfdf5',
+                        borderColor: '#10b981',
+                        borderWidth: 1,
+                      }}
+                      className="rounded-xl px-3 py-1.5 flex-row items-center justify-between shadow-xs"
+                    >
+                      <View className="flex-row items-center gap-1.5 flex-1 pr-2">
+                        <Text className="text-xs">🎉</Text>
+                        <Text className="text-[11px] font-bold text-emerald-950" numberOfLines={1}>
+                          {schemeDiscount > 0 || Object.keys(acceptedFreeRewards).length > 0
+                            ? `Trade Offer Active${schemeDiscount > 0 ? ` (-₹${schemeDiscount.toFixed(2)})` : ''}${Object.keys(acceptedFreeRewards).length > 0 ? ' + Free Gift' : ''}`
+                            : `${schemeEval.qualifiedSchemes.length} Trade Offer(s) Qualified • Tap to Activate`}
+                        </Text>
+                      </View>
+                      <View className="flex-row items-center gap-1 bg-emerald-600 px-2 py-0.5 rounded-lg">
+                        <Text className="text-[10px] font-bold text-white">
+                          {schemeDiscount > 0 || Object.keys(acceptedFreeRewards).length > 0 ? 'Active Offers' : 'View Offers'}
+                        </Text>
+                        <MaterialIcons name="keyboard-arrow-up" size={14} color="#ffffff" />
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    /* Expanded Banner - Compact & with Minimize button */
+                    <View
+                      style={{
+                        backgroundColor: '#f0fdf4',
+                        borderColor: '#10b981',
+                        borderWidth: 1.5,
+                      }}
+                      className="rounded-2xl p-2.5 shadow-xs"
+                    >
+                      {/* Banner Header with Minimize Toggle */}
+                      <View className="flex-row items-center justify-between mb-1.5 pb-1 border-b border-emerald-200">
+                        <View className="flex-row items-center gap-1.5 flex-1 pr-2">
+                          <Text className="text-xs">🎉</Text>
+                          <Text className="text-xs font-black text-emerald-950 leading-tight">
+                            Trade Offers Qualified ({schemeEval.qualifiedSchemes.length})
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => setIsSchemeBannerMinimized(true)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          className="flex-row items-center gap-0.5 bg-emerald-200 active:bg-emerald-300 px-2.5 py-0.5 rounded-full"
+                          accessibilityLabel="Minimize banner"
+                        >
+                          <Text className="text-[10px] font-bold text-emerald-900">Minimize</Text>
+                          <MaterialIcons name="keyboard-arrow-down" size={13} color="#065f46" />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Schemes List with Max Height to keep items list visible */}
+                      <ScrollView style={{ maxHeight: 155 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
+                        {schemeEval.qualifiedSchemes.map(qs => {
+                          const isFreeAdded = Boolean(acceptedFreeRewards[qs.scheme_id]);
+                          const isDiscountApplied = Boolean(acceptedDiscountSchemes[qs.scheme_id]);
+
+                          return (
+                            <View
+                              key={qs.scheme_id}
+                              style={{
+                                backgroundColor: '#ffffff',
+                                borderColor: (isFreeAdded || isDiscountApplied) ? '#059669' : '#a7f3d0',
+                                borderWidth: 1,
+                              }}
+                              className="rounded-xl p-2 mb-1.5 shadow-xs"
+                            >
+                              <View className="flex-row items-center justify-between mb-0.5">
+                                <Text className="text-xs font-bold text-emerald-950 flex-1 pr-2" numberOfLines={1}>
+                                  {qs.name}
+                                </Text>
+                                <View className={`px-1.5 py-0.5 rounded-md ${(isFreeAdded || isDiscountApplied) ? 'bg-emerald-600' : 'bg-emerald-100'}`}>
+                                  <Text className={`text-[8.5px] font-black uppercase tracking-wider ${(isFreeAdded || isDiscountApplied) ? 'text-white' : 'text-emerald-800'}`}>
+                                    {(isFreeAdded || isDiscountApplied) ? 'Active ✓' : 'Qualified'}
+                                  </Text>
+                                </View>
+                              </View>
+
+                              <Text className="text-[11px] font-semibold text-emerald-800 mb-1.5 leading-tight">
+                                {qs.reward_summary}
+                              </Text>
+
+                              {/* FREE PRODUCT ACTION */}
+                              {qs.freeItem && (
+                                <View className="flex-row items-center justify-between pt-1 border-t border-emerald-100">
+                                  <View className="flex-row items-center gap-1 flex-1 pr-2">
+                                    <MaterialIcons name="inventory-2" size={12} color="#047857" />
+                                    <Text className="text-[9.5px] text-emerald-800 font-medium" numberOfLines={1}>
+                                      {isFreeAdded ? '✓ Added (Deducts Van stock)' : 'Stock reduces from Van'}
+                                    </Text>
+                                  </View>
+
+                                  {isFreeAdded ? (
+                                    <TouchableOpacity
+                                      onPress={() => handleRemoveFreeReward(qs.scheme_id)}
+                                      className="bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-lg flex-row items-center gap-1 active:bg-emerald-100"
+                                      activeOpacity={0.7}
+                                    >
+                                      <MaterialIcons name="check" size={11} color="#065f46" />
+                                      <Text className="text-[9.5px] font-bold text-emerald-800">Added</Text>
+                                      <Text className="text-[9.5px] text-red-600 font-bold ml-0.5">Remove</Text>
+                                    </TouchableOpacity>
+                                  ) : (
+                                    <TouchableOpacity
+                                      onPress={() => handleAddFreeReward(qs)}
+                                      className="bg-emerald-600 active:bg-emerald-700 px-2.5 py-1 rounded-lg shadow-xs flex-row items-center gap-1"
+                                      activeOpacity={0.8}
+                                    >
+                                      <MaterialIcons name="add-circle" size={12} color="#ffffff" />
+                                      <Text className="text-[10.5px] font-extrabold text-white">
+                                        + Add Free Reward Item
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              )}
+
+                              {/* DISCOUNT ACTION */}
+                              {qs.reward_type === 'DISCOUNT' && (
+                                <View className="flex-row items-center justify-between pt-1 border-t border-emerald-100">
+                                  <View className="flex-row items-center gap-1 flex-1 pr-2">
+                                    <MaterialIcons name="local-offer" size={12} color="#047857" />
+                                    <Text className="text-[9.5px] text-emerald-800 font-medium" numberOfLines={1}>
+                                      {isDiscountApplied
+                                        ? `✓ Applied (-₹${(Number(qs.discount_amount) || 0).toFixed(2)})`
+                                        : `Save ₹${(Number(qs.discount_amount) || 0).toFixed(2)} on bill`}
+                                    </Text>
+                                  </View>
+
+                                  {isDiscountApplied ? (
+                                    <TouchableOpacity
+                                      onPress={() => handleRemoveDiscountScheme(qs.scheme_id)}
+                                      className="bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-lg flex-row items-center gap-1 active:bg-emerald-100"
+                                      activeOpacity={0.7}
+                                    >
+                                      <MaterialIcons name="check" size={11} color="#065f46" />
+                                      <Text className="text-[9.5px] font-bold text-emerald-800">Applied</Text>
+                                      <Text className="text-[9.5px] text-red-600 font-bold ml-0.5">Remove</Text>
+                                    </TouchableOpacity>
+                                  ) : (
+                                    <TouchableOpacity
+                                      onPress={() => handleApplyDiscountScheme(qs.scheme_id)}
+                                      className="bg-emerald-600 active:bg-emerald-700 px-2.5 py-1 rounded-lg shadow-xs flex-row items-center gap-1"
+                                      activeOpacity={0.8}
+                                    >
+                                      <MaterialIcons name="percent" size={12} color="#ffffff" />
+                                      <Text className="text-[10.5px] font-extrabold text-white">
+                                        + Apply Scheme Discount (-₹{(Number(qs.discount_amount) || 0).toFixed(2)})
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                              )}
+                            </View>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              )}
+
               {/* Bill Summary & Cash Collection Box */}
               <View
                 style={{ backgroundColor: '#f8fafc', borderColor: '#e2e8f0', borderWidth: 1 }}
@@ -4096,17 +4452,32 @@ export default function Sales() {
                       </View>
                     </View>
 
-                    {/* Total Discount Row (highlighted if > 0) */}
-                    {totalDiscount > 0 && (
+                    {/* Item Discount Row (highlighted if manualDiscount > 0) */}
+                    {manualDiscount > 0 && (
                       <View className="flex-row justify-between items-center bg-rose-50 px-2 py-1 rounded-lg border border-rose-100">
                         <View className="flex-row items-center gap-1">
                           <MaterialIcons name="local-offer" size={12} color="#e11d48" />
                           <Text className="text-[10px] font-bold text-rose-800">
-                            Total Item Discount:
+                            Item Discount:
                           </Text>
                         </View>
                         <Text className="text-xs font-black text-rose-700">
-                          - ₹{totalDiscount.toFixed(2)}
+                          - ₹{manualDiscount.toFixed(2)}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Scheme Trade Discount Row (highlighted if schemeDiscount > 0) */}
+                    {schemeDiscount > 0 && (
+                      <View className="flex-row justify-between items-center bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200">
+                        <View className="flex-row items-center gap-1">
+                          <MaterialIcons name="card-giftcard" size={12} color="#059669" />
+                          <Text className="text-[10px] font-bold text-emerald-800">
+                            Scheme Trade Discount:
+                          </Text>
+                        </View>
+                        <Text className="text-xs font-black text-emerald-700">
+                          - ₹{schemeDiscount.toFixed(2)}
                         </Text>
                       </View>
                     )}

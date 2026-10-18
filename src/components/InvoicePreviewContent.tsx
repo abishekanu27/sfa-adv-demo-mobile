@@ -270,21 +270,32 @@ function wrapText13(text: string, maxLen = 13): string {
         <Text style={[styles.thermalText, styles.thermalDivider]}>{dividerSingleText}</Text>
 
         {/* 3. Items Table Header */}
-        <View style={{ flexDirection: 'row', paddingVertical: 3, borderBottomWidth: 1, borderBottomColor: '#71717a', alignItems: 'center' }}>
-          <Text style={[styles.thermalText, { fontWeight: '800', width: 16, fontSize: 8.5, flexShrink: 0 }]}>#</Text>
-          <Text style={[styles.thermalText, { fontWeight: '800', flex: 1, minWidth: 65, fontSize: 8.5 }]}>Item</Text>
-          <Text style={[styles.thermalText, { fontWeight: '800', width: 26, textAlign: 'center', fontSize: 8.5, flexShrink: 0 }]}>QTY</Text>
-          <Text style={[styles.thermalText, { fontWeight: '800', width: 28, textAlign: 'center', fontSize: 8.5, flexShrink: 0 }]}>UNIT</Text>
-          <Text style={[styles.thermalText, { fontWeight: '800', width: 42, textAlign: 'right', fontSize: 8.5, flexShrink: 0 }]}>MRP</Text>
-          <Text style={[styles.thermalText, { fontWeight: '800', width: 42, textAlign: 'right', fontSize: 8.5, flexShrink: 0 }]}>Rate</Text>
-          <Text style={[styles.thermalText, { fontWeight: '800', width: 56, textAlign: 'right', fontSize: 8.5, flexShrink: 0 }]}>Total</Text>
-        </View>
+        {hasGst ? (
+          <View style={{ flexDirection: 'row', paddingVertical: 2.5, borderBottomWidth: 1, borderBottomColor: '#71717a', alignItems: 'center' }}>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 14, fontSize: 7.5, flexShrink: 0 }]}>#</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', flex: 1, minWidth: 50, fontSize: 7.5 }]}>Item</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 22, textAlign: 'center', fontSize: 7.5, flexShrink: 0 }]}>QTY</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 24, textAlign: 'center', fontSize: 7.5, flexShrink: 0 }]}>Unit</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 26, textAlign: 'center', fontSize: 7.5, flexShrink: 0 }]}>GST</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 48, textAlign: 'right', fontSize: 7.5, flexShrink: 0 }]}>Taxable Value</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 38, textAlign: 'right', fontSize: 7.5, flexShrink: 0 }]}>Rate</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 50, textAlign: 'right', fontSize: 7.5, flexShrink: 0 }]}>Total Amount</Text>
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', paddingVertical: 3, borderBottomWidth: 1, borderBottomColor: '#71717a', alignItems: 'center' }}>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 16, fontSize: 8.5, flexShrink: 0 }]}>#</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', flex: 1, minWidth: 65, fontSize: 8.5 }]}>Item</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 28, textAlign: 'center', fontSize: 8.5, flexShrink: 0 }]}>QTY</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 30, textAlign: 'center', fontSize: 8.5, flexShrink: 0 }]}>Unit</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 48, textAlign: 'right', fontSize: 8.5, flexShrink: 0 }]}>Rate</Text>
+            <Text style={[styles.thermalText, { fontWeight: '800', width: 56, textAlign: 'right', fontSize: 8.5, flexShrink: 0 }]}>Total Amount</Text>
+          </View>
+        )}
 
         {/* Items Rows */}
         {invoice.items.map((item, idx) => {
           const qty = Number(item.qty) || 1;
           const rate = Number(item.unit_price) || 0;
-          const mrp = Number((item as any).mrp) > 0 ? Number((item as any).mrp) : rate;
           const gross = qty * rate;
           const rawLineTotal = Number(item.total);
           const lineTotal = (!isNaN(rawLineTotal) && rawLineTotal > 0) ? rawLineTotal : gross;
@@ -313,29 +324,55 @@ function wrapText13(text: string, maxLen = 13): string {
           const itemTitle = formatItemTitle(item);
           const wrappedTitle = wrapText13(itemTitle);
 
-          return (
-            <View key={idx} style={{ flexDirection: 'row', paddingVertical: 3.5, borderBottomWidth: 0.5, borderBottomColor: '#e4e4e7', alignItems: 'flex-start' }}>
-              <Text style={[styles.thermalText, { width: 16, fontSize: 8, flexShrink: 0 }]}>{idx + 1}</Text>
-              <Text style={[styles.thermalText, { flex: 1, minWidth: 65, fontSize: 8.5, fontWeight: '700', color: '#18181b', paddingRight: 3 }]}>
-                {wrappedTitle}
-              </Text>
-              <Text style={[styles.thermalText, { width: 26, textAlign: 'center', fontWeight: '800', fontSize: 8.5, color: '#18181b', flexShrink: 0 }]}>
-                {qty}
-              </Text>
-              <Text style={[styles.thermalText, { width: 28, textAlign: 'center', fontSize: 8, color: '#64748b', flexShrink: 0 }]}>
-                {unit}
-              </Text>
-              <Text style={[styles.thermalText, { width: 42, textAlign: 'right', color: '#475569', fontSize: 8, flexShrink: 0 }]}>
-                ₹{mrp.toFixed(2)}
-              </Text>
-              <Text style={[styles.thermalText, { width: 42, textAlign: 'right', color: '#475569', fontSize: 8, flexShrink: 0 }]}>
-                ₹{rate.toFixed(2)}
-              </Text>
-              <Text style={[styles.thermalText, { width: 56, textAlign: 'right', fontWeight: '800', fontSize: 8.5, color: '#0f172a', flexShrink: 0 }]}>
-                ₹{total.toFixed(2)}
-              </Text>
-            </View>
-          );
+          if (hasGst) {
+            return (
+              <View key={idx} style={{ flexDirection: 'row', paddingVertical: 3, borderBottomWidth: 0.5, borderBottomColor: '#e4e4e7', alignItems: 'flex-start' }}>
+                <Text style={[styles.thermalText, { width: 14, fontSize: 7, flexShrink: 0 }]}>{idx + 1}</Text>
+                <Text style={[styles.thermalText, { flex: 1, minWidth: 50, fontSize: 7.5, fontWeight: '700', color: '#18181b', paddingRight: 2 }]}>
+                  {wrappedTitle}
+                </Text>
+                <Text style={[styles.thermalText, { width: 22, textAlign: 'center', fontWeight: '800', fontSize: 7.5, color: '#18181b', flexShrink: 0 }]}>
+                  {qty}
+                </Text>
+                <Text style={[styles.thermalText, { width: 24, textAlign: 'center', fontSize: 7, color: '#64748b', flexShrink: 0 }]}>
+                  {unit}
+                </Text>
+                <Text style={[styles.thermalText, { width: 26, textAlign: 'center', color: '#475569', fontSize: 7, flexShrink: 0 }]}>
+                  {gstRate}%
+                </Text>
+                <Text style={[styles.thermalText, { width: 48, textAlign: 'right', color: '#475569', fontSize: 7, flexShrink: 0 }]}>
+                  ₹{taxable.toFixed(2)}
+                </Text>
+                <Text style={[styles.thermalText, { width: 38, textAlign: 'right', color: '#475569', fontSize: 7, flexShrink: 0 }]}>
+                  ₹{rate.toFixed(2)}
+                </Text>
+                <Text style={[styles.thermalText, { width: 50, textAlign: 'right', fontWeight: '800', fontSize: 7.5, color: '#0f172a', flexShrink: 0 }]}>
+                  ₹{total.toFixed(2)}
+                </Text>
+              </View>
+            );
+          } else {
+            return (
+              <View key={idx} style={{ flexDirection: 'row', paddingVertical: 3.5, borderBottomWidth: 0.5, borderBottomColor: '#e4e4e7', alignItems: 'flex-start' }}>
+                <Text style={[styles.thermalText, { width: 16, fontSize: 8, flexShrink: 0 }]}>{idx + 1}</Text>
+                <Text style={[styles.thermalText, { flex: 1, minWidth: 65, fontSize: 8.5, fontWeight: '700', color: '#18181b', paddingRight: 3 }]}>
+                  {wrappedTitle}
+                </Text>
+                <Text style={[styles.thermalText, { width: 28, textAlign: 'center', fontWeight: '800', fontSize: 8.5, color: '#18181b', flexShrink: 0 }]}>
+                  {qty}
+                </Text>
+                <Text style={[styles.thermalText, { width: 30, textAlign: 'center', fontSize: 8, color: '#64748b', flexShrink: 0 }]}>
+                  {unit}
+                </Text>
+                <Text style={[styles.thermalText, { width: 48, textAlign: 'right', color: '#475569', fontSize: 8, flexShrink: 0 }]}>
+                  ₹{rate.toFixed(2)}
+                </Text>
+                <Text style={[styles.thermalText, { width: 56, textAlign: 'right', fontWeight: '800', fontSize: 8.5, color: '#0f172a', flexShrink: 0 }]}>
+                  ₹{total.toFixed(2)}
+                </Text>
+              </View>
+            );
+          }
         })}
 
         {/* Single Dash Line */}

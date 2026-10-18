@@ -237,8 +237,6 @@ export function generateA4InvoiceHtml(data: MobileInvoiceData): string {
     }
     const hsn = (item.hsn_code || '—').trim();
     const itemTitle = formatItemTitle(item);
-    const mrp = Number(item.mrp) > 0 ? Number(item.mrp) : rate;
-
     if (hasGst) {
       return `
         <tr>
@@ -250,9 +248,9 @@ export function generateA4InvoiceHtml(data: MobileInvoiceData): string {
           <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-size: 10px; color: #475569;">${hsn}</td>
           <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-weight: 600;">${qty}</td>
           <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-size: 10px; color: #64748b;">${item.unit || item.package_type || 'Pcs'}</td>
-          <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">₹${mrp.toFixed(2)}</td>
-          <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">₹${rate.toFixed(2)}</td>
+          <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-size: 10px; color: #475569;">${gstRate}%</td>
           <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-weight: 600;">₹${taxable.toFixed(2)}</td>
+          <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">₹${rate.toFixed(2)}</td>
           <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-size: 10px;">₹${cgst.toFixed(2)}<br/><span style="color:#64748b;">(${gstRate/2}%)</span></td>
           <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-size: 10px;">₹${sgst.toFixed(2)}<br/><span style="color:#64748b;">(${gstRate/2}%)</span></td>
           <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-weight: 700; color: #1e3a8a;">₹${lineTotal.toFixed(2)}</td>
@@ -269,7 +267,6 @@ export function generateA4InvoiceHtml(data: MobileInvoiceData): string {
           <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-size: 10px; color: #475569;">${hsn}</td>
           <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-weight: 600;">${qty}</td>
           <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-size: 10px; color: #64748b;">${item.unit || item.package_type || 'Pcs'}</td>
-          <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">₹${mrp.toFixed(2)}</td>
           <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px;">₹${rate.toFixed(2)}</td>
           <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-weight: 700; color: #d97706;">₹${lineTotal.toFixed(2)}</td>
         </tr>
@@ -496,14 +493,15 @@ export function generateA4InvoiceHtml(data: MobileInvoiceData): string {
             <th style="width: 55px; text-align: center;">HSN</th>
             <th style="width: 40px; text-align: center;">Qty</th>
             <th style="width: 40px; text-align: center;">Unit</th>
-            <th style="width: 60px; text-align: right;">MRP (₹)</th>
-            <th style="width: 60px; text-align: right;">Rate (₹)</th>
             ${hasGst ? `
-              <th style="width: 70px; text-align: right;">Taxable Value</th>
+              <th style="width: 50px; text-align: center;">GST (%)</th>
+              <th style="width: 75px; text-align: right;">Taxable Value</th>
+              <th style="width: 65px; text-align: right;">Rate (₹)</th>
               <th style="width: 60px; text-align: right;">CGST</th>
               <th style="width: 60px; text-align: right;">SGST</th>
               <th style="width: 75px; text-align: right;">Total</th>
             ` : `
+              <th style="width: 65px; text-align: right;">Rate (₹)</th>
               <th style="width: 75px; text-align: right;">Total (₹)</th>
             `}
           </tr>
@@ -829,21 +827,35 @@ export function generateThermalInvoiceHtml(data: MobileInvoiceData): string {
       const unit = rawUnit.toLowerCase() === 'loose' ? 'Bag' : rawUnit;
       const itemTitle = formatItemTitle(item);
       const wrappedTitle = wrapThermalItemName(itemTitle, 13);
-      const mrp = Number(item.mrp) > 0 ? Number(item.mrp) : rate;
-
-      return `
-        <tr style="border-bottom: 0.5px solid #e4e4e7;">
-          <td style="padding: 4px 1px; font-size: ${is58mm ? '8px' : '9px'}; vertical-align: top; width: 14px;">${idx + 1}</td>
-          <td style="padding: 4px 1px; font-size: ${is58mm ? '8.5px' : '9.5px'}; font-weight: 700; color: #18181b; vertical-align: top; word-break: break-word;">
-            ${wrappedTitle}
-          </td>
-          <td style="padding: 4px 1px; font-size: ${is58mm ? '8.5px' : '9.5px'}; text-align: center; font-weight: 700; vertical-align: top; width: 24px;">${qty}</td>
-          <td style="padding: 4px 1px; font-size: ${is58mm ? '8px' : '9px'}; text-align: center; color: #64748b; vertical-align: top; width: 28px;">${unit}</td>
-          <td style="padding: 4px 1px; font-size: ${is58mm ? '8px' : '9px'}; text-align: right; color: #475569; vertical-align: top; width: 42px; white-space: nowrap;">₹${mrp.toFixed(2)}</td>
-          <td style="padding: 4px 1px; font-size: ${is58mm ? '8px' : '9px'}; text-align: right; color: #475569; vertical-align: top; width: 42px; white-space: nowrap;">₹${rate.toFixed(2)}</td>
-          <td style="padding: 4px 1px; font-size: ${is58mm ? '8.5px' : '9.5px'}; text-align: right; font-weight: 800; color: #0f172a; vertical-align: top; width: 56px; white-space: nowrap;">₹${total.toFixed(2)}</td>
-        </tr>
-      `;
+      if (hasGst) {
+        return `
+          <tr style="border-bottom: 0.5px solid #e4e4e7;">
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7px' : '8px'}; vertical-align: top; width: 14px;">${idx + 1}</td>
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7.5px' : '8.5px'}; font-weight: 700; color: #18181b; vertical-align: top; word-break: break-word;">
+              ${wrappedTitle}
+            </td>
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7.5px' : '8.5px'}; text-align: center; font-weight: 700; vertical-align: top; width: 22px;">${qty}</td>
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7px' : '8px'}; text-align: center; color: #64748b; vertical-align: top; width: 24px;">${unit}</td>
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7px' : '8px'}; text-align: center; color: #475569; vertical-align: top; width: 26px;">${gstRate}%</td>
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7px' : '8px'}; text-align: right; color: #475569; vertical-align: top; width: 48px; white-space: nowrap;">₹${taxable.toFixed(2)}</td>
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7px' : '8px'}; text-align: right; color: #475569; vertical-align: top; width: 38px; white-space: nowrap;">₹${rate.toFixed(2)}</td>
+            <td style="padding: 3px 1px; font-size: ${is58mm ? '7.5px' : '8.5px'}; text-align: right; font-weight: 800; color: #0f172a; vertical-align: top; width: 50px; white-space: nowrap;">₹${total.toFixed(2)}</td>
+          </tr>
+        `;
+      } else {
+        return `
+          <tr style="border-bottom: 0.5px solid #e4e4e7;">
+            <td style="padding: 4px 1px; font-size: ${is58mm ? '8px' : '9px'}; vertical-align: top; width: 14px;">${idx + 1}</td>
+            <td style="padding: 4px 1px; font-size: ${is58mm ? '8.5px' : '9.5px'}; font-weight: 700; color: #18181b; vertical-align: top; word-break: break-word;">
+              ${wrappedTitle}
+            </td>
+            <td style="padding: 4px 1px; font-size: ${is58mm ? '8.5px' : '9.5px'}; text-align: center; font-weight: 700; vertical-align: top; width: 28px;">${qty}</td>
+            <td style="padding: 4px 1px; font-size: ${is58mm ? '8px' : '9px'}; text-align: center; color: #64748b; vertical-align: top; width: 30px;">${unit}</td>
+            <td style="padding: 4px 1px; font-size: ${is58mm ? '8px' : '9px'}; text-align: right; color: #475569; vertical-align: top; width: 48px; white-space: nowrap;">₹${rate.toFixed(2)}</td>
+            <td style="padding: 4px 1px; font-size: ${is58mm ? '8.5px' : '9.5px'}; text-align: right; font-weight: 800; color: #0f172a; vertical-align: top; width: 56px; white-space: nowrap;">₹${total.toFixed(2)}</td>
+          </tr>
+        `;
+      }
     })
     .join('');
 
@@ -1091,15 +1103,27 @@ export function generateThermalInvoiceHtml(data: MobileInvoiceData): string {
         <!-- Items Table -->
         <table class="items-table">
           <thead>
-            <tr>
-              <th style="text-align: left; width: 14px; padding: 3px 1px;">#</th>
-              <th style="text-align: left; padding: 3px 1px;">Item</th>
-              <th style="text-align: center; width: 24px; padding: 3px 1px;">QTY</th>
-              <th style="text-align: center; width: 28px; padding: 3px 1px;">UNIT</th>
-              <th style="text-align: right; width: 42px; padding: 3px 1px;">MRP</th>
-              <th style="text-align: right; width: 42px; padding: 3px 1px;">Rate</th>
-              <th style="text-align: right; width: 56px; padding: 3px 1px; white-space: nowrap;">Total</th>
-            </tr>
+            ${hasGst ? `
+              <tr>
+                <th style="text-align: left; width: 14px; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'};">#</th>
+                <th style="text-align: left; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'};">Item</th>
+                <th style="text-align: center; width: 22px; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'};">QTY</th>
+                <th style="text-align: center; width: 24px; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'};">Unit</th>
+                <th style="text-align: center; width: 26px; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'};">GST</th>
+                <th style="text-align: right; width: 48px; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'};">Taxable Value</th>
+                <th style="text-align: right; width: 38px; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'};">Rate</th>
+                <th style="text-align: right; width: 50px; padding: 2px 1px; font-size: ${is58mm ? '7px' : '8px'}; white-space: nowrap;">Total Amount</th>
+              </tr>
+            ` : `
+              <tr>
+                <th style="text-align: left; width: 14px; padding: 3px 1px;">#</th>
+                <th style="text-align: left; padding: 3px 1px;">Item</th>
+                <th style="text-align: center; width: 28px; padding: 3px 1px;">QTY</th>
+                <th style="text-align: center; width: 30px; padding: 3px 1px;">Unit</th>
+                <th style="text-align: right; width: 48px; padding: 3px 1px;">Rate</th>
+                <th style="text-align: right; width: 56px; padding: 3px 1px; white-space: nowrap;">Total Amount</th>
+              </tr>
+            `}
           </thead>
           <tbody>
             ${itemsRowsHtml}

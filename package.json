@@ -1,12 +1,13 @@
 {
   "name": "mobile",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "dependencies": {
     "@expo/ui": "~57.0.19",
     "@expo/vector-icons": "^15.1.1",
     "expo": "~57.0.24",
     "expo-battery": "~57.0.3",
+    "expo-build-properties": "^57.0.22",
     "expo-constants": "~57.0.19",
     "expo-dev-client": "~57.0.19",
     "expo-device": "~57.0.2",

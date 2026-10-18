@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getSyncMeta, setSyncMeta, clearSalesmanLocalData } from '../database/db';
 import { getBackendBaseUrl, syncDatabase, syncCompanyProfile } from '../database/sync';
+import {
+  getOrCreateDeviceId,
+  getDeviceDisplayName,
+  getDeviceModel,
+  isStockSyncedWithPhone,
+  getSyncedSalesmanOnPhone,
+} from '../utils/deviceInfo';
 
 export interface AuthUser {
   id: string;
@@ -95,20 +102,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Please enter username and password.' };
     }
 
+    const deviceId = getOrCreateDeviceId();
+    const deviceName = getDeviceDisplayName();
+    const deviceModel = getDeviceModel();
+
+    // 1. Local Pre-check: If stock has been synced with this phone, ensure it is the same salesman
+    if (isStockSyncedWithPhone()) {
+      const syncedSalesman = getSyncedSalesmanOnPhone();
+      const normInput = trimmedIdentifier.toLowerCase();
+      const isMatch =
+        syncedSalesman &&
+        ((syncedSalesman.id && syncedSalesman.id.toLowerCase() === normInput) ||
+         (syncedSalesman.username && syncedSalesman.username.toLowerCase() === normInput));
+
+      if (syncedSalesman && !isMatch) {
+        return {
+          success: false,
+          message: 'A salesman already synced and cannot login with another account',
+        };
+      }
+    }
+
     const baseUrl = getBackendBaseUrl();
 
     try {
-      // 1. Attempt API login
+      // 2. Attempt API login with device identification
       const response = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-client-type': 'mobile',
+          'x-device-id': deviceId,
+          'x-device-name': deviceName,
+          'x-device-model': deviceModel,
         },
         body: JSON.stringify({
           usernameOrEmail: trimmedIdentifier,
           password,
           client_type: 'mobile',
+          device_id: deviceId,
+          device_name: deviceName,
+          device_model: deviceModel,
         }),
       });
 
@@ -141,7 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           assigned_beats: data.user.assigned_beats,
         };
 
-        // If logging in as a different user, clear previous salesman's local van stocks and bookings
+        // If logging in as a different user AND stock is not synced, clear previous salesman's local van stocks and bookings
         try {
           const lastUserId = getSyncMeta('last_logged_in_user_id');
           const lastBranchId = getSyncMeta('last_logged_in_branch_id');
@@ -157,7 +191,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           const currentBranchStr = String(authUser.branch_id || '');
           if ((prevId && prevId !== authUser.id) || (prevBranch && prevBranch !== currentBranchStr)) {
-            clearSalesmanLocalData();
+            // Only clear data if stock has NOT been synced with this phone
+            if (!isStockSyncedWithPhone()) {
+              clearSalesmanLocalData();
+            }
           }
           setSyncMeta('last_logged_in_user_id', authUser.id);
           setSyncMeta('last_logged_in_branch_id', currentBranchStr);
@@ -188,7 +225,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (networkError: any) {
       console.log('Network login attempt failed, checking offline demo / cached credentials...');
 
-      // 2. Offline Fallback strictly for field sales (if device has no network connection)
+      // 3. Offline Fallback strictly for field sales (if device has no network connection)
+      // Check again if phone has active synced stock for another salesman
+      if (isStockSyncedWithPhone()) {
+        const syncedSalesman = getSyncedSalesmanOnPhone();
+        const normInput = trimmedIdentifier.toLowerCase();
+        const isMatch =
+          syncedSalesman &&
+          ((syncedSalesman.id && syncedSalesman.id.toLowerCase() === normInput) ||
+           (syncedSalesman.username && syncedSalesman.username.toLowerCase() === normInput));
+
+        if (syncedSalesman && !isMatch) {
+          return {
+            success: false,
+            message: 'A salesman already synced and cannot login with another account',
+          };
+        }
+      }
+
       const lower = trimmedIdentifier.toLowerCase();
       if (
         (lower === 'abi' && password === '12345678') ||
@@ -206,7 +260,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         const offlineToken = `offline_token_${Date.now()}`;
 
-        // If switching user in offline mode, clear previous salesman data
+        // If switching user in offline mode and stock is not synced, clear previous salesman data
         try {
           const lastUserId = getSyncMeta('last_logged_in_user_id');
           const lastBranchId = getSyncMeta('last_logged_in_branch_id');
@@ -222,7 +276,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           const currentBranchStr = String(offlineUser.branch_id || '');
           if ((prevId && prevId !== offlineUser.id) || (prevBranch && prevBranch !== currentBranchStr)) {
-            clearSalesmanLocalData();
+            if (!isStockSyncedWithPhone()) {
+              clearSalesmanLocalData();
+            }
           }
           setSyncMeta('last_logged_in_user_id', offlineUser.id);
           setSyncMeta('last_logged_in_branch_id', currentBranchStr);
@@ -252,8 +308,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSyncMeta('auth_token', '');
       setSyncMeta('auth_user', '');
       setSyncMeta('user_session_pwd', '');
-      setSyncMeta('last_logged_in_user_id', '');
-      clearSalesmanLocalData(false);
+      // If stock is NOT synced, clean up salesman data for fresh login.
+      // If stock IS synced, preserve local van stocks & device binding until End of Sale is submitted.
+      if (!isStockSyncedWithPhone()) {
+        setSyncMeta('last_logged_in_user_id', '');
+        clearSalesmanLocalData(false);
+      }
     } catch (e) {
       console.warn('Failed to clear SQLite auth tokens:', e);
     }

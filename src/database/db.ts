@@ -220,7 +220,47 @@ function initTables(db: SQLite.SQLiteDatabase) {
       created_at INTEGER,
       updated_at INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS schemes (
+      scheme_id INTEGER PRIMARY KEY NOT NULL,
+      scheme_code TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      scheme_type TEXT NOT NULL,
+      trigger_product_id INTEGER,
+      trigger_product_name TEXT,
+      trigger_product_sku TEXT,
+      trigger_min_qty REAL DEFAULT 1,
+      trigger_unit TEXT DEFAULT 'Pcs',
+      trigger_units_per_pkg INTEGER DEFAULT 1,
+      min_order_amount REAL DEFAULT 0,
+      eligible_product_mode TEXT DEFAULT 'ALL_PRODUCTS',
+      eligible_product_ids TEXT DEFAULT '[]',
+      reward_type TEXT DEFAULT 'FREE_PRODUCT',
+      reward_product_id INTEGER,
+      reward_product_name TEXT,
+      reward_product_sku TEXT,
+      reward_qty REAL DEFAULT 1,
+      reward_unit TEXT DEFAULT 'Pcs',
+      discount_type TEXT DEFAULT 'PERCENTAGE',
+      discount_value REAL DEFAULT 0,
+      discount_percentage REAL DEFAULT 0,
+      discount_amount REAL DEFAULT 0,
+      allow_multiple_slabs INTEGER DEFAULT 1,
+      applicable_customer_type TEXT DEFAULT 'ALL',
+      start_date TEXT,
+      end_date TEXT,
+      is_active INTEGER DEFAULT 1,
+      branch_id INTEGER,
+      branch_name TEXT,
+      updated_at INTEGER
+    );
   `);
+
+  // Migrate existing schemes table if branch_name column is missing
+  try {
+    db.execSync(`ALTER TABLE schemes ADD COLUMN branch_name TEXT;`);
+  } catch {}
 
   // Migrate existing customers table if district/state or credit columns are missing
   try {
@@ -567,6 +607,76 @@ export interface BookingRecord {
   _status?: 'synced' | 'created' | 'updated' | 'deleted';
   created_at: number;
   updated_at: number;
+}
+
+export interface SchemeRecord {
+  scheme_id: number;
+  scheme_code: string;
+  name: string;
+  description?: string | null;
+  scheme_type: 'PRODUCT_BASED' | 'AMOUNT_BASED' | string;
+  trigger_product_id?: number | null;
+  trigger_product_name?: string | null;
+  trigger_product_sku?: string | null;
+  trigger_min_qty?: number;
+  trigger_unit?: string | null;
+  trigger_units_per_pkg?: number | null;
+  min_order_amount?: number;
+  eligible_product_mode?: string | null;
+  eligible_product_ids?: string | number[] | null;
+  reward_type: 'FREE_PRODUCT' | 'DISCOUNT' | string;
+  reward_product_id?: number | null;
+  reward_product_name?: string | null;
+  reward_product_sku?: string | null;
+  reward_qty?: number;
+  reward_unit?: string | null;
+  discount_type?: 'PERCENTAGE' | 'FIXED' | string;
+  discount_value?: number;
+  discount_percentage?: number;
+  discount_amount?: number;
+  allow_multiple_slabs?: boolean | number;
+  applicable_customer_type?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  is_active: boolean | number;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  updated_at?: number;
+}
+
+export interface FreeSchemeItem {
+  product_id: number | null;
+  product_name: string;
+  product_sku: string;
+  qty: number;
+  unit: string;
+  package_type: string;
+  unit_price: number;
+  total: number;
+  is_free: boolean;
+  is_scheme_free: boolean;
+  scheme_id: number;
+  scheme_name: string;
+}
+
+export interface QualifiedSchemeItem {
+  scheme_id: number;
+  scheme_code: string;
+  name: string;
+  type: string;
+  reward_type: string;
+  trigger_summary: string;
+  reward_summary: string;
+  reward_qty?: number;
+  reward_unit?: string;
+  discount_amount?: number;
+  freeItem?: FreeSchemeItem;
+}
+
+export interface SchemeEvaluationResult {
+  qualifiedSchemes: QualifiedSchemeItem[];
+  totalDiscount: number;
+  freeItems: FreeSchemeItem[];
 }
 
 export interface VanStockRecord {
@@ -3811,6 +3921,458 @@ export function getClosingStockReportData(): {
       },
     };
   }
+}
+
+// ---------------------- Schemes & Promotional Offers DAO ----------------------
+
+export function getSchemes(search?: string, type?: string): SchemeRecord[] {
+  const db = getDatabase();
+  let userBranchId: number | null = null;
+  let isGlobalUser = false;
+  try {
+    const savedBranchId = getSyncMeta('authorized_branch_id');
+    if (savedBranchId && !isNaN(Number(savedBranchId))) {
+      userBranchId = Number(savedBranchId);
+    }
+    const rawUser = getSyncMeta('auth_user');
+    if (rawUser) {
+      const parsed = JSON.parse(rawUser);
+      if (
+        parsed.role === 'ADMIN' ||
+        parsed.role === 'SUPER_ADMIN' ||
+        parsed.role_code === 'ADMIN' ||
+        parsed.allowed_modules?.includes('all_access') ||
+        (Array.isArray(parsed.assigned_branches) && (parsed.assigned_branches.includes('all') || parsed.assigned_branches.includes('*')))
+      ) {
+        isGlobalUser = true;
+      }
+      if (userBranchId == null) {
+        if (parsed.branch_id != null && !isNaN(Number(parsed.branch_id))) {
+          userBranchId = Number(parsed.branch_id);
+        } else if (parsed.branch?.branch_id != null && !isNaN(Number(parsed.branch.branch_id))) {
+          userBranchId = Number(parsed.branch.branch_id);
+        }
+      }
+    }
+  } catch {}
+
+  let query = `SELECT * FROM schemes WHERE 1=1`;
+  const params: any[] = [];
+
+  if (!isGlobalUser && userBranchId != null) {
+    query += ` AND (branch_id IS NULL OR branch_id = 0 OR branch_id = ?)`;
+    params.push(userBranchId);
+  }
+
+  if (type && type !== 'ALL') {
+    if (type === 'PRODUCT_BASED') {
+      query += ` AND (scheme_type = 'PRODUCT_BASED' OR scheme_type = 'BOGO_QTY')`;
+    } else if (type === 'AMOUNT_BASED') {
+      query += ` AND (scheme_type = 'AMOUNT_BASED' OR scheme_type = 'MIN_ORDER_VALUE' OR scheme_type = 'FLAT_DISCOUNT')`;
+    } else {
+      query += ` AND scheme_type = ?`;
+      params.push(type);
+    }
+  }
+
+  if (search && search.trim()) {
+    const s = `%${search.trim().toLowerCase()}%`;
+    query += ` AND (LOWER(name) LIKE ? OR LOWER(scheme_code) LIKE ? OR LOWER(trigger_product_name) LIKE ? OR LOWER(reward_product_name) LIKE ?)`;
+    params.push(s, s, s, s);
+  }
+
+  query += ` ORDER BY is_active DESC, scheme_id DESC`;
+  return db.getAllSync<SchemeRecord>(query, params);
+}
+
+export function getActiveSchemes(): SchemeRecord[] {
+  const db = getDatabase();
+  const todayStr = new Date().toISOString().split('T')[0];
+  let userBranchId: number | null = null;
+  let isGlobalUser = false;
+  try {
+    const savedBranchId = getSyncMeta('authorized_branch_id');
+    if (savedBranchId && !isNaN(Number(savedBranchId))) {
+      userBranchId = Number(savedBranchId);
+    }
+    const rawUser = getSyncMeta('auth_user');
+    if (rawUser) {
+      const parsed = JSON.parse(rawUser);
+      if (
+        parsed.role === 'ADMIN' ||
+        parsed.role === 'SUPER_ADMIN' ||
+        parsed.role_code === 'ADMIN' ||
+        parsed.allowed_modules?.includes('all_access') ||
+        (Array.isArray(parsed.assigned_branches) && (parsed.assigned_branches.includes('all') || parsed.assigned_branches.includes('*')))
+      ) {
+        isGlobalUser = true;
+      }
+      if (userBranchId == null) {
+        if (parsed.branch_id != null && !isNaN(Number(parsed.branch_id))) {
+          userBranchId = Number(parsed.branch_id);
+        } else if (parsed.branch?.branch_id != null && !isNaN(Number(parsed.branch.branch_id))) {
+          userBranchId = Number(parsed.branch.branch_id);
+        }
+      }
+    }
+  } catch {}
+
+  let query = `SELECT * FROM schemes 
+     WHERE (is_active = 1 OR is_active = 'true')
+       AND (start_date IS NULL OR start_date = '' OR start_date <= ?)
+       AND (end_date IS NULL OR end_date = '' OR end_date >= ?)`;
+  const params: any[] = [todayStr, todayStr];
+
+  if (!isGlobalUser && userBranchId != null) {
+    query += ` AND (branch_id IS NULL OR branch_id = 0 OR branch_id = ?)`;
+    params.push(userBranchId);
+  }
+
+  query += ` ORDER BY scheme_id ASC`;
+  return db.getAllSync<SchemeRecord>(query, params);
+}
+
+export function replaceSchemes(schemes: any[]): void {
+  if (!Array.isArray(schemes)) return;
+  const db = getDatabase();
+  db.runSync(`DELETE FROM schemes`);
+
+  for (const s of schemes) {
+    const schemeId = Number(s.scheme_id || s.id) || Date.now();
+    const schemeCode = s.scheme_code || `SCH-${schemeId}`;
+    const name = s.name || 'Promotional Trade Scheme';
+    const description = s.description || '';
+    const schemeType = s.scheme_type || 'PRODUCT_BASED';
+
+    const triggerProdId = s.trigger_product_id != null ? Number(s.trigger_product_id) : null;
+    const triggerProdName = s.trigger_product_name || null;
+    const triggerProdSku = s.trigger_product_sku || null;
+    const triggerMinQty = Number(s.trigger_min_qty) || 1;
+    const triggerUnit = s.trigger_unit || 'Pcs';
+    const triggerUnitsPerPkg = Number(s.trigger_units_per_pkg) || 1;
+
+    const minOrderAmount = Number(s.min_order_amount) || 0;
+    const eligibleProdMode = s.eligible_product_mode || 'ALL_PRODUCTS';
+    const eligibleProdIds = typeof s.eligible_product_ids === 'string' 
+      ? s.eligible_product_ids 
+      : JSON.stringify(s.eligible_product_ids || []);
+
+    const rewardType = s.reward_type || 'FREE_PRODUCT';
+    const rewardProdId = s.reward_product_id != null ? Number(s.reward_product_id) : null;
+    const rewardProdName = s.reward_product_name || null;
+    const rewardProdSku = s.reward_product_sku || null;
+    const rewardQty = Number(s.reward_qty) || 1;
+    const rewardUnit = s.reward_unit || 'Pcs';
+
+    const discountType = s.discount_type || 'PERCENTAGE';
+    const discountVal = Number(s.discount_value != null ? s.discount_value : (s.discount_percentage || s.discount_amount)) || 0;
+    const discountPct = Number(s.discount_percentage) || (discountType === 'PERCENTAGE' ? discountVal : 0);
+    const discountAmt = Number(s.discount_amount) || (discountType !== 'PERCENTAGE' ? discountVal : 0);
+
+    const allowMultiple = s.allow_multiple_slabs !== false && s.allow_multiple_slabs !== 0 ? 1 : 0;
+    const applicableCustType = s.applicable_customer_type || 'ALL';
+    const startDate = s.start_date ? String(s.start_date).split('T')[0] : null;
+    const endDate = s.end_date ? String(s.end_date).split('T')[0] : null;
+    const isActive = s.is_active !== false && s.is_active !== 0 ? 1 : 0;
+    const branchId = s.branch_id != null ? Number(s.branch_id) : null;
+    const branchName = s.branch_name || (branchId ? `Branch #${branchId}` : 'All Branches');
+
+    db.runSync(
+      `INSERT INTO schemes (
+        scheme_id, scheme_code, name, description, scheme_type,
+        trigger_product_id, trigger_product_name, trigger_product_sku,
+        trigger_min_qty, trigger_unit, trigger_units_per_pkg,
+        min_order_amount, eligible_product_mode, eligible_product_ids,
+        reward_type, reward_product_id, reward_product_name, reward_product_sku,
+        reward_qty, reward_unit, discount_type, discount_value, discount_percentage, discount_amount,
+        allow_multiple_slabs, applicable_customer_type, start_date, end_date,
+        is_active, branch_id, branch_name, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        schemeId, schemeCode, name, description, schemeType,
+        triggerProdId, triggerProdName, triggerProdSku,
+        triggerMinQty, triggerUnit, triggerUnitsPerPkg,
+        minOrderAmount, eligibleProdMode, eligibleProdIds,
+        rewardType, rewardProdId, rewardProdName, rewardProdSku,
+        rewardQty, rewardUnit, discountType, discountVal, discountPct, discountAmt,
+        allowMultiple, applicableCustType, startDate, endDate,
+        isActive, branchId, branchName, Date.now()
+      ]
+    );
+  }
+}
+
+export function evaluateLocalSchemes(
+  items: Array<{
+    product_id: string | number;
+    product_name?: string;
+    name?: string;
+    sku?: string;
+    qty: number;
+    bag_qty?: number;
+    loose_qty?: number;
+    package_type?: string;
+    unit?: string;
+    unit_price?: number;
+    rate?: number;
+    total?: number;
+    items_per_package?: number;
+    is_free?: boolean;
+    is_scheme_free?: boolean;
+  }>,
+  totalAmount: number = 0
+): SchemeEvaluationResult {
+  const activeSchemes = getActiveSchemes();
+  const qualifiedSchemes: QualifiedSchemeItem[] = [];
+  const freeItems: FreeSchemeItem[] = [];
+  let totalDiscount = 0;
+
+  const paidItems = (items || []).filter(it => !it.is_free && !it.is_scheme_free && Number(it.qty) > 0);
+  const cartGross = Number(totalAmount) > 0 
+    ? Number(totalAmount) 
+    : paidItems.reduce((acc, it) => acc + (Number(it.total) || (Number(it.qty) * (Number(it.unit_price || it.rate) || 0))), 0);
+
+  for (const sc of activeSchemes) {
+    const isProductBased = sc.scheme_type === 'PRODUCT_BASED' || sc.scheme_type === 'BOGO_QTY';
+    const isAmountBased = sc.scheme_type === 'AMOUNT_BASED' || sc.scheme_type === 'MIN_ORDER_VALUE' || sc.scheme_type === 'FLAT_DISCOUNT';
+
+    if (isProductBased) {
+      const trigProdId = sc.trigger_product_id ? Number(sc.trigger_product_id) : null;
+      const trigProdName = (sc.trigger_product_name || '').toLowerCase().trim();
+
+      const matched = paidItems.filter(it => {
+        const pId = Number(it.product_id);
+        const pName = (it.product_name || it.name || '').toLowerCase().trim();
+        if (trigProdId) {
+          return pId === trigProdId;
+        }
+        if (trigProdName && !['qualifying product', 'any product', 'any'].includes(trigProdName)) {
+          return pName === trigProdName || pName.includes(trigProdName);
+        }
+        return false;
+      });
+
+      if (matched.length === 0) continue;
+
+      // Pack size of the product
+      const stockPackSize = Number(matched[0].items_per_package) || 1;
+      const schemePackSize = Number(sc.trigger_units_per_pkg) || 1;
+      const itemsPerPkg = Math.max(1, stockPackSize > 1 ? stockPackSize : schemePackSize);
+
+      const triggerUnit = (sc.trigger_unit || 'Pcs').toLowerCase().trim();
+      const isPackageTrigger = ['bag', 'box', 'carton', 'case'].includes(triggerUnit);
+      const minQty = Math.max(1, Number(sc.trigger_min_qty) || 1);
+
+      let totalPieces = 0;
+      let totalBagsPurchased = 0;
+      let totalLoosePurchased = 0;
+      let totalItemGross = 0;
+
+      for (const it of matched) {
+        const itBag = Number(it.bag_qty) || 0;
+        const itLoose = Number(it.loose_qty) || 0;
+        const itPack = Number(it.items_per_package) || itemsPerPkg;
+
+        if (itBag > 0 || itLoose > 0) {
+          totalBagsPurchased += itBag;
+          totalLoosePurchased += itLoose;
+          totalPieces += (itBag * itPack) + itLoose;
+        } else {
+          const q = Number(it.qty) || 0;
+          const pType = (it.package_type || it.unit || 'Loose').toLowerCase();
+          const isPackItem = ['bag', 'box', 'carton', 'case'].includes(pType);
+          if (isPackItem) {
+            totalBagsPurchased += q;
+            totalPieces += (q * itPack);
+          } else {
+            totalLoosePurchased += q;
+            totalPieces += q;
+          }
+        }
+        totalItemGross += (Number(it.total) || (Number(it.qty) * (Number(it.unit_price || it.rate) || 0)));
+      }
+
+      let qualifies = false;
+      let sets = 0;
+
+      if (isPackageTrigger) {
+        // Scheme explicitly requires BAGS/BOXES (e.g. "Buy 1 Bag" or "Buy 2 Boxes")
+        // Qualifying quantity is the number of full bags/boxes purchased
+        if (totalBagsPurchased >= minQty && minQty > 0) {
+          qualifies = true;
+          const allowMultiple = sc.allow_multiple_slabs !== false && sc.allow_multiple_slabs !== 0;
+          sets = allowMultiple ? Math.floor(totalBagsPurchased / minQty) : 1;
+        }
+      } else {
+        // Scheme requires PIECES/UNITS (e.g. "Buy 2 Units", "Buy 5 Pieces", "Buy 10 Pieces")
+        // Loose pieces purchased must satisfy minQty (or totalPieces if item has no bag packaging)
+        const qualifyingPieces = (totalLoosePurchased > 0 || totalBagsPurchased === 0)
+          ? totalLoosePurchased
+          : 0;
+        if (qualifyingPieces >= minQty && minQty > 0) {
+          qualifies = true;
+          const allowMultiple = sc.allow_multiple_slabs !== false && sc.allow_multiple_slabs !== 0;
+          sets = allowMultiple ? Math.floor(qualifyingPieces / minQty) : 1;
+        }
+      }
+
+      if (qualifies && sets >= 1) {
+        const trigDispName = matched[0].product_name || matched[0].name || sc.trigger_product_name || 'Qualifying Product';
+
+        if (sc.reward_type === 'FREE_PRODUCT') {
+          const freeQty = sets * (Number(sc.reward_qty) || 1);
+          const rewardName = sc.reward_product_name || trigDispName;
+          const rewardUnit = sc.reward_unit || 'Pcs';
+
+          const freeItemObj: FreeSchemeItem = {
+            product_id: sc.reward_product_id ? Number(sc.reward_product_id) : (matched[0].product_id ? Number(matched[0].product_id) : null),
+            product_name: rewardName,
+            product_sku: sc.reward_product_sku || (matched[0] as any).product_sku || (matched[0] as any).sku || 'SCH-FREE',
+            qty: freeQty,
+            unit: rewardUnit,
+            package_type: ['bag', 'box'].includes(rewardUnit.toLowerCase()) ? rewardUnit : 'Loose',
+            unit_price: 0,
+            total: 0,
+            is_free: true,
+            is_scheme_free: true,
+            scheme_id: sc.scheme_id,
+            scheme_name: sc.name,
+          };
+
+          qualifiedSchemes.push({
+            scheme_id: sc.scheme_id,
+            scheme_code: sc.scheme_code,
+            name: sc.name,
+            type: 'PRODUCT_BASED',
+            reward_type: 'FREE_PRODUCT',
+            trigger_summary: isPackageTrigger 
+              ? `Purchased ${(totalPieces / itemsPerPkg).toFixed(1)} ${sc.trigger_unit || 'Bag'} (${totalPieces} pcs) of ${trigDispName}`
+              : `Purchased ${totalPieces} ${sc.trigger_unit || 'Pcs'} of ${trigDispName}`,
+            reward_summary: `Eligible for ${freeQty}x ${rewardName} FREE`,
+            reward_qty: freeQty,
+            reward_unit: rewardUnit,
+            freeItem: freeItemObj,
+          });
+
+          freeItems.push(freeItemObj);
+        } else if (sc.reward_type === 'DISCOUNT') {
+          const discType = sc.discount_type || 'PERCENTAGE';
+          const discVal = Number(sc.discount_value || sc.discount_percentage || sc.discount_amount) || 0;
+          let discAmt = 0;
+          const allowMultiple = sc.allow_multiple_slabs !== false && sc.allow_multiple_slabs !== 0;
+          if (discType === 'PERCENTAGE') {
+            discAmt = Math.round((totalItemGross * (discVal / 100)) * 100) / 100;
+          } else {
+            discAmt = allowMultiple ? (sets * discVal) : discVal;
+          }
+
+          if (discAmt > 0) {
+            totalDiscount += discAmt;
+            qualifiedSchemes.push({
+              scheme_id: sc.scheme_id,
+              scheme_code: sc.scheme_code,
+              name: sc.name,
+              type: 'PRODUCT_BASED',
+              reward_type: 'DISCOUNT',
+              trigger_summary: isPackageTrigger
+                ? `Purchased qualifying quantity of ${trigDispName} (${(totalPieces / itemsPerPkg).toFixed(1)} ${sc.trigger_unit})`
+                : `Purchased ${totalPieces} ${sc.trigger_unit || 'Pcs'} of ${trigDispName}`,
+              reward_summary: `Discount: ${discType === 'PERCENTAGE' ? `${discVal}%` : `₹${discVal}`} (-₹${discAmt.toFixed(2)})`,
+              discount_amount: discAmt,
+            });
+          }
+        }
+      }
+    } else if (isAmountBased) {
+      const minAmount = Number(sc.min_order_amount) || 0;
+      if (minAmount <= 0) continue;
+
+      let eligibleGross = cartGross;
+      if (sc.eligible_product_mode === 'SELECTED_PRODUCTS') {
+        let eligibleIds: number[] = [];
+        try {
+          if (Array.isArray(sc.eligible_product_ids)) {
+            eligibleIds = sc.eligible_product_ids.map(Number);
+          } else if (typeof sc.eligible_product_ids === 'string') {
+            eligibleIds = JSON.parse(sc.eligible_product_ids).map(Number);
+          }
+        } catch {}
+
+        if (eligibleIds.length > 0) {
+          const eligibleItems = paidItems.filter(it => eligibleIds.includes(Number(it.product_id)));
+          eligibleGross = eligibleItems.reduce((acc, it) => acc + (Number(it.total) || (Number(it.qty) * (Number(it.unit_price || it.rate) || 0))), 0);
+        }
+      }
+
+      if (eligibleGross >= minAmount) {
+        const allowMultiple = sc.allow_multiple_slabs !== false && sc.allow_multiple_slabs !== 0;
+        const sets = allowMultiple ? Math.floor(eligibleGross / minAmount) : 1;
+
+        if (sets >= 1) {
+          if (sc.reward_type === 'FREE_PRODUCT') {
+            const freeQty = sets * (Number(sc.reward_qty) || 1);
+            const rewardName = sc.reward_product_name || 'Retailer Eco Carry Bag';
+            const rewardUnit = sc.reward_unit || 'Pcs';
+
+            const freeItemObj: FreeSchemeItem = {
+              product_id: sc.reward_product_id ? Number(sc.reward_product_id) : null,
+              product_name: rewardName,
+              product_sku: sc.reward_product_sku || 'PROMO-FREE',
+              qty: freeQty,
+              unit: rewardUnit,
+              package_type: ['bag', 'box'].includes(rewardUnit.toLowerCase()) ? rewardUnit : 'Unit',
+              unit_price: 0,
+              total: 0,
+              is_free: true,
+              is_scheme_free: true,
+              scheme_id: sc.scheme_id,
+              scheme_name: sc.name,
+            };
+
+            qualifiedSchemes.push({
+              scheme_id: sc.scheme_id,
+              scheme_code: sc.scheme_code,
+              name: sc.name,
+              type: 'AMOUNT_BASED',
+              reward_type: 'FREE_PRODUCT',
+              trigger_summary: `Order Total reached ₹${eligibleGross.toFixed(2)} (Min: ₹${minAmount.toFixed(2)})`,
+              reward_summary: `Eligible for ${freeQty}x ${rewardName} FREE`,
+              reward_qty: freeQty,
+              reward_unit: rewardUnit,
+              freeItem: freeItemObj,
+            });
+
+            freeItems.push(freeItemObj);
+          } else if (sc.reward_type === 'DISCOUNT') {
+            const discType = sc.discount_type || 'PERCENTAGE';
+            const discVal = Number(sc.discount_value || sc.discount_percentage || sc.discount_amount) || 0;
+            let discAmt = 0;
+            if (discType === 'PERCENTAGE') {
+              discAmt = Math.round((eligibleGross * (discVal / 100)) * 100) / 100;
+            } else {
+              discAmt = allowMultiple ? (sets * discVal) : discVal;
+            }
+
+            if (discAmt > 0) {
+              totalDiscount += discAmt;
+              qualifiedSchemes.push({
+                scheme_id: sc.scheme_id,
+                scheme_code: sc.scheme_code,
+                name: sc.name,
+                type: 'AMOUNT_BASED',
+                reward_type: 'DISCOUNT',
+                trigger_summary: `Order Total reached ₹${eligibleGross.toFixed(2)} (Min: ₹${minAmount.toFixed(2)})`,
+                reward_summary: `Discount: ${discType === 'PERCENTAGE' ? `${discVal}%` : `₹${discVal}`} (-₹${discAmt.toFixed(2)})`,
+                discount_amount: discAmt,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { qualifiedSchemes, totalDiscount, freeItems };
 }
 
 

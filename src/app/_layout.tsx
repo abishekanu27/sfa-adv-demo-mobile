@@ -326,6 +326,14 @@ function TabsNavigation() {
         }}
       />
       <Tabs.Screen
+        name="schemes"
+        options={{
+          title: 'Trade Schemes & Offers',
+          tabBarLabel: 'Schemes',
+          tabBarIcon: ({ color }) => <MaterialIcons name="local-offer" size={23} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="stocks"
         options={{
           title: 'Stocks',

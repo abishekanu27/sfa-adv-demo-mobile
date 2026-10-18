@@ -36,6 +36,7 @@ import { getCompanyLogo } from '../utils/companyBranding';
 import {
   sendImmediateLocationPing,
 } from '../services/gpsTrackingService';
+import { getOrCreateDeviceId, clearPhoneStockSync } from '../utils/deviceInfo';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -187,16 +188,19 @@ export default function Dashboard() {
 
       // 2. Call backend End of Sale API to transfer all van stocks to warehouse in DB & verify reverse password
       const baseUrl = getBackendBaseUrl();
+      const deviceId = getOrCreateDeviceId();
       const response = await fetch(`${baseUrl}/api/sales/end-of-sale`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-device-id': deviceId,
         },
         body: JSON.stringify({
           salesman_id: user?.id,
           salesman_name: user?.name,
           username: user?.username,
           reverse_password: trimmedInput,
+          device_id: deviceId,
         }),
       });
 
@@ -210,6 +214,7 @@ export default function Dashboard() {
 
       // 3. Clear local van stocks, bookings, invoices, expenses and checked out vehicle in SQLite
       clearSalesmanLocalData(false);
+      clearPhoneStockSync();
       setAssignedRoute(null);
       setSelectedRoute('');
 
@@ -244,6 +249,7 @@ export default function Dashboard() {
         const expectedRev = savedPwd.split('').reverse().join('');
         if (trimmedInput === expectedRev) {
           clearSalesmanLocalData(false);
+          clearPhoneStockSync();
           setAssignedRoute(null);
           setSelectedRoute('');
           setStats(getDashboardStats(''));
@@ -610,6 +616,27 @@ export default function Dashboard() {
             <Text className="text-[10px] text-rose-500 mt-1 font-medium">Uncollected balance</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Trade Schemes & Promotional Offers Card */}
+        <TouchableOpacity
+          onPress={() => router.push('/schemes')}
+          className="bg-white rounded-2xl p-3.5 mb-3 shadow-sm border border-indigo-200 flex-row items-center justify-between active:bg-indigo-50/60"
+          activeOpacity={0.8}
+        >
+          <View className="flex-row items-center gap-3 flex-1 mr-2">
+            <View className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 items-center justify-center">
+              <MaterialIcons name="local-offer" size={22} color="#4f46e5" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-xs font-bold text-slate-800">Trade Schemes & Offers</Text>
+              <Text className="text-[10px] text-slate-500">View active BOGO deals, free rewards & discounts</Text>
+            </View>
+          </View>
+          <View className="flex-row items-center gap-1 bg-indigo-600 px-3 py-1.5 rounded-xl shadow-xs">
+            <MaterialIcons name="card-giftcard" size={14} color="#ffffff" />
+            <Text className="text-[10px] font-bold text-white">View Offers</Text>
+          </View>
+        </TouchableOpacity>
 
         {/* End of Sale Submit Menu */}
         <TouchableOpacity

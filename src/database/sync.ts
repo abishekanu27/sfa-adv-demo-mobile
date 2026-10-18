@@ -23,11 +23,16 @@ import {
   ProductRecord,
   RouteInfo,
   upsertExpenses,
+  replaceSchemes,
+  SchemeRecord,
 } from './db';
+import { getOrCreateDeviceId, setPhoneStockSynced } from '../utils/deviceInfo';
 
 export function getBackendBaseUrl(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
+  const envUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (envUrl && envUrl.trim() !== '') {
+    // Strip trailing slash and trailing /api so baseUrl is always the clean domain root
+    return envUrl.trim().replace(/\/api\/?$/i, '').replace(/\/+$/, '');
   }
 
   const hostUri = Constants.expoConfig?.hostUri;
@@ -36,7 +41,7 @@ export function getBackendBaseUrl(): string {
     return `http://${host}:5000`;
   }
 
-  return 'http://localhost:5000';
+  return 'https://sfa-demo-api.onrender.com';
 }
 
 export async function syncDatabase(): Promise<{
@@ -197,11 +202,16 @@ export async function syncDatabase(): Promise<{
   const localBookingCount = db.getFirstSync<{ c: number }>(`SELECT COUNT(*) as c FROM advance_bookings`)?.c || 0;
   const effectiveLastPulledAt = localBookingCount === 0 ? 0 : lastPulledAt;
 
+  const deviceId = getOrCreateDeviceId();
   const pullUrl = `${baseUrl}/api/sync/pull?lastPulledAt=${effectiveLastPulledAt}&salesman_id=${encodeURIComponent(
     salesmanId
-  )}&username=${encodeURIComponent(username)}&phone=${encodeURIComponent(phone)}`;
+  )}&username=${encodeURIComponent(username)}&phone=${encodeURIComponent(phone)}&device_id=${encodeURIComponent(deviceId)}`;
 
-  const pullRes = await fetch(pullUrl);
+  const pullRes = await fetch(pullUrl, {
+    headers: {
+      'x-device-id': deviceId,
+    },
+  });
   if (!pullRes.ok) {
     const errText = await pullRes.text();
     throw new Error(`Pull failed (${pullRes.status}): ${errText}`);
@@ -217,12 +227,18 @@ export async function syncDatabase(): Promise<{
     products,
     price_groups,
     product_prices,
+    schemes,
     all_server_booking_ids,
     all_server_customer_ids,
     available_salesmen,
     timestamp,
   } = pullData;
   let pulledCount = 0;
+
+  // Save Promotional Schemes & Offers from Web
+  if (Array.isArray(schemes)) {
+    replaceSchemes(schemes);
+  }
 
   // Save Available Peer Salesmen (from Web route mappings)
   if (Array.isArray(available_salesmen)) {
@@ -275,6 +291,13 @@ export async function syncDatabase(): Promise<{
   // Save Van Stock (Ponny, etc.)
   if (Array.isArray(van_stocks)) {
     replaceVanStocks(van_stocks);
+    const totalLoadedQty = van_stocks.reduce(
+      (acc: number, item: any) => acc + (parseFloat(item.total_qty || item.quantity || 0) || 0),
+      0
+    );
+    if (totalLoadedQty > 0 && authUser) {
+      setPhoneStockSynced(authUser, true);
+    }
   }
 
   // Save Central Warehouse Stocks across all warehouses
@@ -706,3 +729,23 @@ export async function syncCompanyProfile(): Promise<CompanyProfile> {
   }
   return getCompanyProfile();
 }
+
+export async function syncSchemes(): Promise<SchemeRecord[]> {
+  try {
+    const baseUrl = getBackendBaseUrl();
+    const userBranchId = getSyncMeta('authorized_branch_id');
+    const branchParam = userBranchId && userBranchId !== 'undefined' ? `&branch_id=${userBranchId}` : '';
+    const res = await fetch(`${baseUrl}/api/schemes?status=active${branchParam}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json.data)) {
+        replaceSchemes(json.data);
+        return json.data;
+      }
+    }
+  } catch (e) {
+    console.warn('Direct schemes fetch skipped (offline or server unreachable):', e);
+  }
+  return [];
+}
+

@@ -3,12 +3,20 @@
     "name": "SoftAir SFA",
     "slug": "softair-sfa",
     "scheme": "softair-sfa",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/SoftAir_SFA.png",
     "plugins": [
-      "react-native-thermal-printer-driver"
+      "react-native-thermal-printer-driver",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "android": {
       "package": "com.softair.sfa",
@@ -33,9 +41,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "d174c818-87ed-4b08-ada6-efea31c97fa1"
+        "projectId": "6d50acb1-3e9e-4024-9df4-fd473439cc7b"
       }
     },
-    "owner": "softair-soultions"
+    "owner": "abishektherock"
   }
 }
