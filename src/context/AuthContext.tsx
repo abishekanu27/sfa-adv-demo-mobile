@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getSyncMeta, setSyncMeta, clearSalesmanLocalData } from '../database/db';
+import { getSyncMeta, setSyncMeta, clearSalesmanLocalData, getCompanyProfile } from '../database/db';
 import { getBackendBaseUrl, syncDatabase, syncCompanyProfile } from '../database/sync';
+import { stopAutoSyncEngine } from '../services/autoSyncService';
 import {
   getOrCreateDeviceId,
   getDeviceDisplayName,
@@ -226,6 +227,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Network login attempt failed, checking offline demo / cached credentials...');
 
       // 3. Offline Fallback strictly for field sales (if device has no network connection)
+      const cachedCompany = getCompanyProfile();
+      if (cachedCompany?.mobile_access_enabled === false) {
+        return {
+          success: false,
+          message: 'Access Restricted: Mobile Application access is currently disabled by Super Administrator. Login with existing credentials is not permitted.',
+        };
+      }
+
       // Check again if phone has active synced stock for another salesman
       if (isStockSyncedWithPhone()) {
         const syncedSalesman = getSyncedSalesmanOnPhone();
@@ -302,6 +311,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    stopAutoSyncEngine();
     setUser(null);
     setToken(null);
     try {

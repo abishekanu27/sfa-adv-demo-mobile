@@ -2382,6 +2382,8 @@ export interface CompanyProfile {
     showBankDetails?: boolean;
     showTaxBreakdown?: boolean;
   };
+  web_access_enabled?: boolean;
+  mobile_access_enabled?: boolean;
 }
 
 export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {

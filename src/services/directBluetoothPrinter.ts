@@ -689,7 +689,7 @@ export function buildInvoiceEscPosNodes(data: MobileInvoiceData, paperSize: '58m
 
   // 1. Header: Company Name & Contact Info (Centered)
   const compName = sanitizeAscii(company.company_name || 'SOFTAIR SOLUTIONS PVTLTD');
-  nodes.push(text(compName, { align: 'center', bold: true, size: is80 ? 2 : 1 }));
+  nodes.push(text(compName, { align: 'center', bold: true }));
 
   if (company.tagline) {
     nodes.push(text(sanitizeAscii(company.tagline), { align: 'center' }));
@@ -1119,7 +1119,7 @@ export function buildExpenseEscPosNodes(
 
   // Company Name & Header
   const compName = sanitizeAscii(company.company_name || 'SOFTAIR SOLUTIONS PVTLTD');
-  nodes.push(text(compName, { align: 'center', bold: true, size: is80 ? 2 : 1 }));
+  nodes.push(text(compName, { align: 'center', bold: true }));
   const cityState = [company.city, company.state].filter(Boolean).map(sanitizeAscii).join(', ');
   if (cityState) {
     nodes.push(text(cityState, { align: 'center' }));
@@ -1292,7 +1292,7 @@ export function buildReportEscPosNodes(
 
   // Company Name
   const compName = sanitizeAscii(company.company_name || 'SOFTAIR SOLUTIONS PVTLTD');
-  nodes.push(text(compName, { align: 'center', bold: true, size: is80 ? 2 : 1 }));
+  nodes.push(text(compName, { align: 'center', bold: true }));
 
   // Report Title Badge
   nodes.push(text(`[ ${sanitizeAscii(options.title.toUpperCase())} ]`, { align: 'center', bold: true }));

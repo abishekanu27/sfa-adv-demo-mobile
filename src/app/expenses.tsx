@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import {
   getAssignedRoute,
 } from '../database/db';
 import { syncDatabase } from '../database/sync';
+import { triggerImmediateSync, addAutoSyncListener } from '../services/autoSyncService';
 import { useAuth } from '../context/AuthContext';
 import {
   printExpenseDirectBluetooth,
@@ -77,6 +78,15 @@ export default function ExpensesScreen() {
       console.warn('Failed to load expenses data:', e);
     }
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = addAutoSyncListener((event) => {
+      if (event.success && (event.pulledCount > 0 || event.pushedCount > 0)) {
+        loadData();
+      }
+    });
+    return unsubscribe;
+  }, [loadData]);
 
   useFocusEffect(
     useCallback(() => {
@@ -190,9 +200,7 @@ export default function ExpensesScreen() {
       setIsModalOpen(false);
 
       // 3. Proactively trigger background sync to backend DB
-      syncDatabase().catch(err => {
-        console.warn('Background sync after expense failed (will retry):', err);
-      });
+      triggerImmediateSync('expense_created');
 
       if (shouldPrint) {
         setIsPrintingVoucher(true);

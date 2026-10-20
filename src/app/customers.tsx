@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ import {
 import { syncDatabase } from '../database/sync';
 import { LoadingIndicator } from '../components/LoadingIndicator';
 import { acquireDeviceGpsCoordinates } from '../services/gpsTrackingService';
+import { triggerImmediateSync, addAutoSyncListener } from '../services/autoSyncService';
 
 export default function Customers() {
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
@@ -126,6 +127,15 @@ export default function Customers() {
     }
   }, [search]);
 
+  useEffect(() => {
+    const unsubscribe = addAutoSyncListener((event) => {
+      if (event.success && (event.pulledCount > 0 || event.pushedCount > 0)) {
+        loadCustomers();
+      }
+    });
+    return unsubscribe;
+  }, [loadCustomers]);
+
   useFocusEffect(
     useCallback(() => {
       loadCustomers();
@@ -217,6 +227,7 @@ export default function Customers() {
       setModalVisible(false);
 
       loadCustomers();
+      triggerImmediateSync('customer_created');
       Alert.alert(
         'Customer Added Successfully!',
         `${name.trim()} added under beat area "${routeArea.trim()}" (${districtName}). It will sync with the Web application under Customer Details.`

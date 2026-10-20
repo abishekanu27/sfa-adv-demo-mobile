@@ -308,11 +308,11 @@ export function generateA4InvoiceHtml(data: MobileInvoiceData): string {
         margin-bottom: 12px;
       }
       .company-title {
-        font-size: 18px;
-        font-weight: 800;
+        font-size: 13.5px;
+        font-weight: 700;
         color: #0f172a;
         margin-bottom: 3px;
-        letter-spacing: -0.02em;
+        letter-spacing: -0.01em;
       }
       .company-meta {
         font-size: 10.5px;
@@ -910,9 +910,9 @@ export function generateThermalInvoiceHtml(data: MobileInvoiceData): string {
           object-fit: contain;
         }
         .company-name {
-          font-size: ${( (is58mm ? 13 : 15) * fontScale ).toFixed(1)}px;
-          font-weight: 900;
-          letter-spacing: 0.3px;
+          font-size: ${( (is58mm ? 10.5 : 12) * fontScale ).toFixed(1)}px;
+          font-weight: 800;
+          letter-spacing: 0.2px;
           color: #18181b;
           margin: 0 0 2px 0;
           text-transform: uppercase;

@@ -273,9 +273,9 @@ export async function printDiagnosticTestSlip(): Promise<void> {
           margin: 2px 0;
         }
         .title {
-          font-size: ${(14 * scale).toFixed(1)}px;
-          font-weight: 900;
-          letter-spacing: 0.5px;
+          font-size: ${(11 * scale).toFixed(1)}px;
+          font-weight: 700;
+          letter-spacing: 0.3px;
         }
         .sub {
           font-size: ${(9.5 * scale).toFixed(1)}px;

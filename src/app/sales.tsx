@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -60,6 +60,7 @@ import {
 } from '../services/invoiceService';
 import { abortActivePrint } from '../services/printerSettingsService';
 import { sendImmediateLocationPing } from '../services/gpsTrackingService';
+import { triggerImmediateSync, addAutoSyncListener } from '../services/autoSyncService';
 import { useAuth } from '../context/AuthContext';
 
 
@@ -164,6 +165,15 @@ export default function Sales() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = addAutoSyncListener((event) => {
+      if (event.success && (event.pulledCount > 0 || event.pushedCount > 0)) {
+        loadData();
+      }
+    });
+    return unsubscribe;
+  }, [loadData]);
 
   useFocusEffect(
     useCallback(() => {
@@ -286,6 +296,7 @@ export default function Sales() {
       setPaymentModalVisible(false);
       loadData();
       sendImmediateLocationPing().catch(() => {});
+      triggerImmediateSync('customer_payment');
       Alert.alert(
         'Payment Received!',
         `Successfully collected ₹${amount.toFixed(2)} via ${paymentMode} from ${paymentCustomer.name}. Outstanding balance updated.`
@@ -1374,6 +1385,7 @@ export default function Sales() {
       setStockSearch('');
       loadData();
       sendImmediateLocationPing().catch(() => {});
+      triggerImmediateSync('sale_order_created');
 
       if (saleType === 'order') {
         Alert.alert(
@@ -1763,6 +1775,7 @@ export default function Sales() {
       setStockSearch('');
       loadData();
       sendImmediateLocationPing().catch(() => {});
+      triggerImmediateSync('product_return_created');
 
       Alert.alert(
         'Product Return Recorded!',

@@ -7,6 +7,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { LoadingIndicator } from '../components/LoadingIndicator';
 import { startLiveGpsTracking, stopLiveGpsTracking } from '../services/gpsTrackingService';
+import { startAutoSyncEngine, stopAutoSyncEngine } from '../services/autoSyncService';
 
 import { Image } from 'expo-image';
 
@@ -243,12 +244,15 @@ function TabsNavigation() {
 
     if (!user && !isLoginPage) {
       stopLiveGpsTracking();
+      stopAutoSyncEngine();
       router.replace('/login');
     } else if (user && isLoginPage) {
       startLiveGpsTracking(20000);
+      startAutoSyncEngine(15000);
       router.replace('/');
     } else if (user) {
       startLiveGpsTracking(20000);
+      startAutoSyncEngine(15000);
     }
   }, [user, isLoading, segments]);
 
@@ -289,6 +293,8 @@ function TabsNavigation() {
           user ? (
             <TouchableOpacity
               onPress={async () => {
+                stopLiveGpsTracking();
+                stopAutoSyncEngine();
                 await logout();
                 router.replace('/login');
               }}

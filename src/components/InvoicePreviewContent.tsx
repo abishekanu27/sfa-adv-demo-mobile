@@ -196,7 +196,7 @@ function wrapText13(text: string, maxLen = 13): string {
               contentFit="contain"
             />
           ) : null}
-          <Text style={[styles.thermalText, { fontSize: is58mm ? 13 : 15, fontWeight: '900', textAlign: 'center' }]}>
+          <Text style={[styles.thermalText, { fontSize: is58mm ? 10.5 : 12, fontWeight: '800', textAlign: 'center' }]}>
             {companyName}
           </Text>
           {companyAddress ? (

@@ -934,7 +934,7 @@ export default function ReportsScreen() {
                   })()}
 
                   {/* Company Header */}
-                  <Text style={{ fontSize: 15, fontWeight: '900', color: '#0f172a', textAlign: 'center', letterSpacing: 0.5 }}>
+                  <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#0f172a', textAlign: 'center', letterSpacing: 0.2 }}>
                     {company?.company_name || 'SOFTAIR SOLUTIONS PVTLTD'}
                   </Text>
                   {company?.address ? (

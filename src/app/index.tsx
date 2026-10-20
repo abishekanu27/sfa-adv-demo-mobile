@@ -36,6 +36,7 @@ import { getCompanyLogo } from '../utils/companyBranding';
 import {
   sendImmediateLocationPing,
 } from '../services/gpsTrackingService';
+import { triggerImmediateSync, addAutoSyncListener, getAutoSyncState } from '../services/autoSyncService';
 import { getOrCreateDeviceId, clearPhoneStockSync } from '../utils/deviceInfo';
 
 export default function Dashboard() {
@@ -114,25 +115,36 @@ export default function Dashboard() {
     }, [loadData, refreshGps])
   );
 
-  const handleSync = async (showSuccessAlert: boolean = true) => {
+  const [syncState, setSyncState] = useState(() => getAutoSyncState());
+
+  useEffect(() => {
+    const unsubscribe = addAutoSyncListener((event) => {
+      setSyncState({
+        isRunning: true,
+        isSyncing: event.reason === 'sync_started',
+        isOnline: event.isOnline,
+        lastSyncTime: event.timestamp,
+        lastStatus: event.success ? 'synced' : (event.isOnline ? 'error' : 'offline'),
+        lastError: event.error || null,
+        lastPulledCount: event.pulledCount,
+        lastPushedCount: event.pushedCount,
+      });
+      if (event.success) {
+        loadData();
+        refreshGps();
+      }
+    });
+    return unsubscribe;
+  }, [loadData, refreshGps]);
+
+  const handleSync = async (showAlert: boolean = false) => {
     setSyncing(true);
-    try {
-      const result = await syncDatabase();
+    triggerImmediateSync('manual_user_tap');
+    setTimeout(() => {
+      setSyncing(false);
       loadData();
       refreshGps();
-      if (showSuccessAlert) {
-        Alert.alert(
-          'Sync Completed',
-          `Route: ${result.routeInfo?.route_name || 'Up to date'}\nVan Stock: ${result.vanStocksCount || 0} items\nPulled: ${result.pulledCount} records\nPushed: ${result.pushedCount} records`
-        );
-      }
-    } catch (e: any) {
-      if (showSuccessAlert) {
-        Alert.alert('Sync Error', e.message || 'Could not sync with backend server.');
-      }
-    } finally {
-      setSyncing(false);
-    }
+    }, 800);
   };
 
   useEffect(() => {
@@ -143,9 +155,12 @@ export default function Dashboard() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await handleSync(false);
+    triggerImmediateSync('pull_to_refresh');
     await refreshGps();
-    setRefreshing(false);
+    setTimeout(() => {
+      loadData();
+      setRefreshing(false);
+    }, 600);
   };
 
   const handleInitiateEndOfSale = () => {
@@ -369,22 +384,42 @@ export default function Dashboard() {
             </View>
           </View>
 
-          {/* Sync Button */}
+          {/* Live Sync Status Indicator Pill */}
           <TouchableOpacity
-            onPress={() => handleSync(true)}
-            disabled={syncing}
-            className={`flex-row items-center gap-1.5 py-2 px-3.5 rounded-2xl shadow-sm ${
-              syncing ? 'bg-blue-100' : 'bg-blue-600 active:bg-blue-700'
+            onPress={() => handleSync(false)}
+            disabled={syncState.isSyncing || syncing}
+            className={`flex-row items-center gap-1.5 py-1.5 px-3 rounded-full border ${
+              syncState.isSyncing || syncing
+                ? 'bg-blue-50 border-blue-200'
+                : syncState.isOnline
+                ? 'bg-emerald-50 border-emerald-200'
+                : 'bg-amber-50 border-amber-200'
             }`}
-            activeOpacity={0.8}
+            activeOpacity={0.7}
           >
-            {syncing ? (
-              <ActivityIndicator size="small" color="#2563eb" />
+            {syncState.isSyncing || syncing ? (
+              <ActivityIndicator size="small" color="#2563eb" style={{ transform: [{ scale: 0.75 }] }} />
             ) : (
-              <MaterialIcons name="sync" size={18} color="#ffffff" />
+              <View
+                className={`w-2 h-2 rounded-full ${
+                  syncState.isOnline ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
             )}
-            <Text className={`text-xs font-bold ${syncing ? 'text-blue-700' : 'text-white'}`}>
-              {syncing ? 'Syncing...' : 'Sync'}
+            <Text
+              className={`text-xs font-bold ${
+                syncState.isSyncing || syncing
+                  ? 'text-blue-700'
+                  : syncState.isOnline
+                  ? 'text-emerald-700'
+                  : 'text-amber-700'
+              }`}
+            >
+              {syncState.isSyncing || syncing
+                ? 'Syncing...'
+                : syncState.isOnline
+                ? 'Live Synced'
+                : 'Offline (Local)'}
             </Text>
           </TouchableOpacity>
         </View>

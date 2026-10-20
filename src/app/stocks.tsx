@@ -40,6 +40,7 @@ import {
   upsertVanTransfers,
 } from '../database/db';
 import { getBackendBaseUrl, syncDatabase } from '../database/sync';
+import { triggerImmediateSync, addAutoSyncListener } from '../services/autoSyncService';
 import { useAuth } from '../context/AuthContext';
 
 export default function StocksScreen() {
@@ -153,6 +154,15 @@ export default function StocksScreen() {
       loadStockData();
     }, [loadStockData])
   );
+
+  useEffect(() => {
+    const unsubscribe = addAutoSyncListener((event) => {
+      if (event.success && (event.pulledCount > 0 || event.pushedCount > 0)) {
+        loadStockData();
+      }
+    });
+    return unsubscribe;
+  }, [loadStockData]);
 
   const [syncing, setSyncing] = useState(false);
 
@@ -423,6 +433,7 @@ export default function StocksScreen() {
       setReqNotes('');
       setReqUnitMode('loose');
       loadStockData();
+      triggerImmediateSync('stock_request_created');
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to submit stock request.');
     } finally {
@@ -625,6 +636,7 @@ export default function StocksScreen() {
       setTransferQty('');
       setTransferSearchQuery('');
       loadStockData();
+      triggerImmediateSync('van_transfer_requested');
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to submit van transfer request.');
     } finally {

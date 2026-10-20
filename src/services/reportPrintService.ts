@@ -175,10 +175,10 @@ export function generateReportHtml(options: ReportPrintOptions): string {
             object-fit: contain;
           }
           .company-name {
-            font-size: ${is58mm ? '12px' : '14px'};
-            font-weight: 900;
+            font-size: ${is58mm ? '9.5px' : '11px'};
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
             margin: 0;
             color: #000000;
           }
