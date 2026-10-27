@@ -9,40 +9,180 @@ import { DEFAULT_COMPANY_LOGO } from '../utils/companyBranding';
  * maintaining state for auth session, routes, and local metadata.
  */
 class WebFallbackDatabase {
+  private tables: Record<string, any[]> = {};
   private metaStore: Record<string, string> = {};
 
   constructor() {
     console.warn(
-      '💡 Running in Web SQLite Fallback mode. LocalStorage will be used for session and metadata.'
+      '💡 Running in Web SQLite Fallback mode. LocalStorage will be used for session, stock, and offline caching.'
     );
   }
 
-  execSync(_sql: string): void {
-    // Schema creation and migrations are safely ignored on web fallback
+  private getTable(tableName: string): any[] {
+    const table = tableName.toLowerCase();
+    if (this.tables[table]) {
+      return this.tables[table];
+    }
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('sf_tbl_' + table);
+        if (stored) {
+          this.tables[table] = JSON.parse(stored);
+          return this.tables[table];
+        }
+      }
+    } catch {}
+    this.tables[table] = [];
+    return this.tables[table];
+  }
+
+  private saveTable(tableName: string): void {
+    const table = tableName.toLowerCase();
+    try {
+      if (typeof localStorage !== 'undefined' && this.tables[table]) {
+        localStorage.setItem('sf_tbl_' + table, JSON.stringify(this.tables[table]));
+      }
+    } catch {}
+  }
+
+  execSync(sql: string): void {
+    const trimmed = sql.trim();
+    if (/^(INSERT|UPDATE|DELETE)/i.test(trimmed)) {
+      this.runSync(trimmed);
+    }
   }
 
   runSync(sql: string, ...params: any[]): { changes: number; lastInsertRowId: number } {
     const trimmed = sql.trim();
-    if (trimmed.toLowerCase().includes('sync_meta')) {
-      const flatParams = params.flat();
-      if (flatParams.length >= 2) {
-        const key = String(flatParams[0]);
-        const val = String(flatParams[1]);
-        this.metaStore[key] = val;
-        try {
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('sf_meta_' + key, val);
-          }
-        } catch {}
+    const flatParams = params.flat();
+
+    // 1. DELETE FROM table
+    const deleteMatch = trimmed.match(/^DELETE\s+FROM\s+([a-zA-Z0-9_]+)(?:\s+WHERE\s+([\s\S]+))?/i);
+    if (deleteMatch) {
+      const table = deleteMatch[1].toLowerCase();
+      const whereClause = deleteMatch[2] ? deleteMatch[2].trim() : '';
+
+      if (!whereClause || whereClause.includes('1=1')) {
+        this.tables[table] = [];
+        this.saveTable(table);
+        return { changes: 1, lastInsertRowId: 1 };
       }
+
+      const rows = this.getTable(table);
+      if (flatParams.length > 0) {
+        const targetVal = flatParams[flatParams.length - 1];
+        if (whereClause.includes('!= ?')) {
+          this.tables[table] = rows.filter(r => !r.salesman_id || r.salesman_id === targetVal);
+        } else {
+          this.tables[table] = rows.filter(
+            r => r.allocation_id != targetVal && r.id != targetVal && r.key != targetVal
+          );
+        }
+      } else {
+        this.tables[table] = [];
+      }
+      this.saveTable(table);
+      return { changes: 1, lastInsertRowId: 1 };
     }
+
+    // 2. INSERT INTO table
+    const insertMatch = trimmed.match(
+      /^INSERT(?:\s+OR\s+[A-Z]+)?\s+INTO\s+([a-zA-Z0-9_]+)\s*\(([\s\S]+?)\)\s*VALUES/i
+    );
+    if (insertMatch) {
+      const table = insertMatch[1].toLowerCase();
+      const colStr = insertMatch[2];
+      const cols = colStr.split(',').map(c => c.trim().replace(/[\r\n\t]/g, ''));
+
+      // Special handling for sync_meta
+      if (table === 'sync_meta') {
+        if (flatParams.length >= 2) {
+          const key = String(flatParams[0]);
+          const val = String(flatParams[1]);
+          this.metaStore[key] = val;
+          try {
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('sf_meta_' + key, val);
+            }
+          } catch {}
+        }
+        return { changes: 1, lastInsertRowId: 1 };
+      }
+
+      const rows = this.getTable(table);
+      const row: Record<string, any> = {};
+      cols.forEach((col, idx) => {
+        row[col] = flatParams[idx] !== undefined ? flatParams[idx] : null;
+      });
+
+      // Primary key check
+      const pk =
+        row.allocation_id !== undefined && row.allocation_id !== null
+          ? 'allocation_id'
+          : row.id !== undefined && row.id !== null
+          ? 'id'
+          : row.product_id !== undefined && row.product_id !== null
+          ? 'product_id'
+          : null;
+
+      if (pk && row[pk] != null) {
+        const existingIdx = rows.findIndex(r => r[pk] === row[pk]);
+        if (existingIdx >= 0) {
+          rows[existingIdx] = { ...rows[existingIdx], ...row };
+        } else {
+          rows.push(row);
+        }
+      } else {
+        rows.push(row);
+      }
+
+      this.saveTable(table);
+      return { changes: 1, lastInsertRowId: rows.length };
+    }
+
+    // 3. UPDATE table SET ... WHERE ...
+    const updateMatch = trimmed.match(
+      /^UPDATE\s+([a-zA-Z0-9_]+)\s+SET\s+([\s\S]+?)\s+WHERE\s+([\s\S]+)$/i
+    );
+    if (updateMatch) {
+      const table = updateMatch[1].toLowerCase();
+      const setPart = updateMatch[2];
+      const rows = this.getTable(table);
+
+      const setCols = setPart.split(',').map(item => item.split('=')[0].trim());
+      const setVals = flatParams.slice(0, setCols.length);
+      const whereVals = flatParams.slice(setCols.length);
+
+      if (whereVals.length > 0) {
+        const targetId = whereVals[whereVals.length - 1];
+        const row = rows.find(
+          r =>
+            r.allocation_id == targetId ||
+            r.id == targetId ||
+            r.product_id == targetId ||
+            r.key == targetId
+        );
+        if (row) {
+          setCols.forEach((col, i) => {
+            if (setVals[i] !== undefined) {
+              row[col] = setVals[i];
+            }
+          });
+          this.saveTable(table);
+        }
+      }
+      return { changes: 1, lastInsertRowId: 1 };
+    }
+
     return { changes: 1, lastInsertRowId: 1 };
   }
 
   getFirstSync<T>(sql: string, ...params: any[]): T | null {
     const trimmed = sql.trim();
+    const flatParams = params.flat();
+
+    // 1. sync_meta
     if (trimmed.toLowerCase().includes('sync_meta')) {
-      const flatParams = params.flat();
       const key = String(flatParams[0]);
       let val: string | null = null;
       try {
@@ -58,16 +198,170 @@ class WebFallbackDatabase {
       }
       return null;
     }
+
+    // 2. Van Stock specific queries
+    if (trimmed.toLowerCase().includes('from van_stocks')) {
+      const rows = this.getTable('van_stocks');
+      const loadedStocks = rows.filter(r => r.status === 'Loaded' || !r.status);
+
+      // Aggregations: COUNT(*), SUM(total_qty), SUM(total_val), cnt, etc.
+      if (
+        trimmed.toLowerCase().includes('count(*)') ||
+        trimmed.toLowerCase().includes('sum(') ||
+        trimmed.toLowerCase().includes('count(*) as cnt')
+      ) {
+        let totalQty = 0;
+        let totalVal = 0;
+        for (const s of loadedStocks) {
+          const qty = Number(s.total_qty) || 0;
+          const price = Number(s.unit_price || s.unit_cost || 0);
+          const val = Number(s.total_value) || qty * price;
+          totalQty += qty;
+          totalVal += val;
+        }
+        return {
+          count: loadedStocks.length,
+          cnt: loadedStocks.length,
+          total_qty: totalQty,
+          total_val: totalVal,
+        } as unknown as T;
+      }
+
+      if (flatParams.length > 0) {
+        const id1 = flatParams[0];
+        const id2 = flatParams[1];
+        const id3 = flatParams[2];
+        const found = loadedStocks.find(
+          r =>
+            (id1 && (r.allocation_id == id1 || r.product_id == id1)) ||
+            (id2 && (r.allocation_id == id2 || r.product_id == id2)) ||
+            (id3 && String(r.product_name).toLowerCase() === String(id3).toLowerCase())
+        );
+        return (found || null) as unknown as T;
+      }
+
+      return (loadedStocks[0] || null) as unknown as T;
+    }
+
+    // 3. Pending sync composite query
+    if (trimmed.toLowerCase().includes("from customers where _status != 'synced'")) {
+      const custs = this.getTable('customers').filter(r => r._status && r._status !== 'synced');
+      const bks = this.getTable('advance_bookings').filter(r => r._status && r._status !== 'synced');
+      return { count: custs.length + bks.length } as unknown as T;
+    }
+
+    // 4. Generic table query
+    const fromMatch = trimmed.match(/FROM\s+([a-zA-Z0-9_]+)/i);
+    if (fromMatch) {
+      const table = fromMatch[1].toLowerCase();
+      const rows = this.getTable(table);
+
+      if (trimmed.toLowerCase().includes('count(*)')) {
+        let active = rows;
+        if (trimmed.includes("_status != 'deleted'")) {
+          active = rows.filter(r => r._status !== 'deleted');
+        }
+        return {
+          count: active.length,
+          cnt: active.length,
+          c: active.length,
+          total: 0,
+          cash: 0,
+          advance: 0,
+          balance: 0,
+          total_exp: 0,
+        } as unknown as T;
+      }
+
+      if (flatParams.length > 0) {
+        const targetId = flatParams[0];
+        const found = rows.find(
+          r =>
+            r.id == targetId ||
+            r.backend_id == targetId ||
+            r.allocation_id == targetId ||
+            r.key == targetId ||
+            r.transfer_code == targetId ||
+            r.request_code == targetId
+        );
+        if (found) return found as unknown as T;
+      }
+
+      return (rows[0] || null) as unknown as T;
+    }
+
     return null;
   }
 
-  getAllSync<T>(_sql: string, ..._params: any[]): T[] {
-    return [];
+  getAllSync<T>(sql: string, ...params: any[]): T[] {
+    const trimmed = sql.trim();
+    const flatParams = params.flat();
+    const fromMatch = trimmed.match(/FROM\s+([a-zA-Z0-9_]+)/i);
+    if (!fromMatch) return [];
+
+    const table = fromMatch[1].toLowerCase();
+    const rows = this.getTable(table);
+
+    if (table === 'van_stocks') {
+      let filtered = rows;
+      if (trimmed.includes("status = 'Loaded'")) {
+        filtered = filtered.filter(r => r.status === 'Loaded' || !r.status);
+      } else if (trimmed.includes("status != 'Deleted'")) {
+        filtered = filtered.filter(r => r.status !== 'Deleted');
+      }
+      if (trimmed.includes('total_qty > 0') || trimmed.includes('quantity > 0')) {
+        filtered = filtered.filter(r => (Number(r.total_qty) || Number(r.quantity) || 0) > 0);
+      }
+      return [...filtered].sort((a, b) =>
+        String(a.product_name || '').localeCompare(String(b.product_name || ''))
+      ) as unknown as T[];
+    }
+
+    if (table === 'warehouse_stocks') {
+      let filtered = rows;
+      if (trimmed.includes('quantity > 0')) {
+        filtered = filtered.filter(r => (Number(r.quantity) || 0) > 0);
+      }
+      if (flatParams.length > 0 && trimmed.includes('warehouse_name LIKE ?')) {
+        const wf = String(flatParams[0]).replace(/%/g, '').toLowerCase();
+        if (wf && wf !== 'all warehouses') {
+          filtered = filtered.filter(r =>
+            String(r.warehouse_name || '').toLowerCase().includes(wf)
+          );
+        }
+      }
+      return [...filtered].sort((a, b) =>
+        String(a.product_name || '').localeCompare(String(b.product_name || ''))
+      ) as unknown as T[];
+    }
+
+    if (table === 'customers') {
+      let filtered = rows.filter(r => r._status !== 'deleted' && r.status !== 'Inactive');
+      return [...filtered].sort((a, b) =>
+        String(a.name || '').localeCompare(String(b.name || ''))
+      ) as unknown as T[];
+    }
+
+    if (table === 'products') {
+      let filtered = rows.filter(r => r.status !== 'Inactive');
+      return [...filtered].sort((a, b) =>
+        String(a.name || '').localeCompare(String(b.name || ''))
+      ) as unknown as T[];
+    }
+
+    if (trimmed.includes("_status != 'deleted'")) {
+      return rows.filter(r => r._status !== 'deleted') as unknown as T[];
+    }
+
+    return rows as unknown as T[];
   }
 
-  prepareSync(): any {
+  prepareSync(sql: string): any {
     return {
-      executeSync: () => ({ getFirstSync: () => null, getAllSync: () => [] }),
+      executeSync: (...params: any[]) => ({
+        getFirstSync: () => this.getFirstSync(sql, ...params),
+        getAllSync: () => this.getAllSync(sql, ...params),
+      }),
       finalizeSync: () => {},
     };
   }
@@ -83,7 +377,7 @@ let dbInstance: SQLite.SQLiteDatabase | null = null;
 
 export function getDatabase(): SQLite.SQLiteDatabase {
   if (!dbInstance) {
-    if (Platform.OS === 'web' && typeof SharedArrayBuffer === 'undefined') {
+    if (Platform.OS === 'web') {
       dbInstance = new WebFallbackDatabase() as unknown as SQLite.SQLiteDatabase;
       initTables(dbInstance);
       return dbInstance;
