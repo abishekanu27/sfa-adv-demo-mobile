@@ -5,6 +5,7 @@ import { getCompanyProfile, CompanyProfile } from '../database/db';
 import { getCompanyLogo } from '../utils/companyBranding';
 import { getPrinterSettings, savePrinterSettings, getDirectPrinterUrl, pairDirectPrinter } from './printerSettingsService';
 import { isDirectBluetoothSupported, printInvoiceDirectBluetooth, ensureOrAutoConnectPrinter } from './directBluetoothPrinter';
+import { universalPrintHtml } from './printHelper';
 
 export interface InvoiceItem {
   product_id?: string | number;
@@ -1313,26 +1314,14 @@ export async function printInvoice(data: MobileInvoiceData, format?: 'thermal' |
   const printerSettings = getPrinterSettings();
   const targetFormat = format || (printerSettings.paperSize === 'A4' ? 'a4' : 'thermal');
 
-  // Direct In-App Bluetooth ESC/POS printing: Instant 1-touch, no RawBT watermark, no external app redirects
-  if (targetFormat !== 'a4') {
-    if (Platform.OS === 'android') {
-      // NEVER redirect to 3rd party apps (RawBT, Print Spooler) on Android thermal receipts
-      if (!isDirectBluetoothSupported()) {
-        throw new Error('Direct In-App Bluetooth printing is supported in the installed Android APK build. Please install the APK preview build to print directly without external apps.');
-      }
+  // Direct In-App Bluetooth ESC/POS printing: Instant 1-touch for native APK builds with paired printer
+  if (targetFormat !== 'a4' && isDirectBluetoothSupported()) {
+    try {
       await ensureOrAutoConnectPrinter();
-      await printInvoiceDirectBluetooth(data);
-      return;
-    }
-
-    if (
-      printerSettings.directPrint &&
-      printerSettings.printerType === 'bluetooth' &&
-      printerSettings.printerAddress &&
-      isDirectBluetoothSupported()
-    ) {
-      await printInvoiceDirectBluetooth(data);
-      return;
+      const ok = await printInvoiceDirectBluetooth(data);
+      if (ok) return;
+    } catch (btErr: any) {
+      console.warn('[printInvoice] Direct Bluetooth print failed or offline, falling back to universal print:', btErr);
     }
   }
 
@@ -1359,48 +1348,10 @@ export async function printInvoice(data: MobileInvoiceData, format?: 'thermal' |
     }
   }
 
-  const printOptions: Print.PrintOptions = {
-    html,
+  await universalPrintHtml(html, {
     width: targetFormat === 'a4' ? 595 : (is58mm ? 164 : 226),
-  };
-
-  if (printerUrl) {
-    printOptions.printerUrl = printerUrl;
-  }
-
-  try {
-    await Print.printAsync(printOptions);
-  } catch (e: any) {
-    const msg = (e?.message || e?.reason || e?.toString() || '').toLowerCase();
-
-    // If the saved printer is offline / unavailable, allow one quick re-pairing
-    if ((msg.includes('not available') || msg.includes('provided printer')) && Platform.OS === 'ios') {
-      try {
-        const reselected = await pairDirectPrinter();
-        if (reselected && reselected.url) {
-          printOptions.printerUrl = reselected.url;
-          await Print.printAsync(printOptions);
-          return;
-        }
-      } catch (retryErr) {
-        // proceed to default error handler
-      }
-    }
-
-    if (
-      msg.includes('complete') ||
-      msg.includes('incomplete') ||
-      msg.includes('cancel') ||
-      msg.includes('dismiss') ||
-      msg.includes('abort') ||
-      msg.includes('picker')
-    ) {
-      const err = new Error('The print operation was canceled.');
-      err.name = 'PrintCancelled';
-      throw err;
-    }
-    throw e;
-  }
+    printerUrl: printerUrl || undefined,
+  });
 }
 
 /**

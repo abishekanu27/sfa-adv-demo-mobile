@@ -5,7 +5,7 @@
 
 import { Platform } from 'react-native';
 import * as Print from 'expo-print';
-import { getSyncMeta, setSyncMeta, getCompanyProfile, setCompanyProfile } from '../database/db';
+import { getSyncMeta, setSyncMeta, getCompanyProfile, setCompanyProfile, ExpenseRecord } from '../database/db';
 import {
   isDirectBluetoothSupported,
   scanBluetoothPrinters,
@@ -21,6 +21,7 @@ import {
   formatDisplayMacAddress,
   ensureOrAutoConnectPrinter,
 } from './directBluetoothPrinter';
+import { universalPrintHtml } from './printHelper';
 
 export {
   isDirectBluetoothSupported,
@@ -125,24 +126,15 @@ export async function pairDirectPrinter(): Promise<{ name: string; url: string }
 export async function printDiagnosticTestSlip(): Promise<void> {
   const settings = getPrinterSettings();
 
-  // 1. Direct Bluetooth ESC/POS hardware test on Android: NEVER redirect to external apps
-  if (Platform.OS === 'android') {
-    if (!isDirectBluetoothSupported()) {
-      throw new Error('Direct In-App Bluetooth printing is supported in the installed Android APK build. Please install the APK preview build to print directly without external apps.');
+  // 1. Direct Bluetooth ESC/POS hardware test for native APK builds with paired printer
+  if (isDirectBluetoothSupported()) {
+    try {
+      await ensureOrAutoConnectPrinter();
+      const ok = await printDiagnosticSlipDirectBluetooth();
+      if (ok) return;
+    } catch (btErr) {
+      console.warn('[printDiagnosticTestSlip] Direct Bluetooth failed, falling back to universal print:', btErr);
     }
-    await ensureOrAutoConnectPrinter();
-    await printDiagnosticSlipDirectBluetooth();
-    return;
-  }
-
-  // 2. Direct Bluetooth ESC/POS hardware test (Posiflow PSF310 & compatible thermal printers)
-  if (
-    settings.printerType === 'bluetooth' &&
-    settings.printerAddress &&
-    isDirectBluetoothSupported()
-  ) {
-    await printDiagnosticSlipDirectBluetooth();
-    return;
   }
 
   const company = getCompanyProfile();
@@ -269,19 +261,154 @@ export async function printDiagnosticTestSlip(): Promise<void> {
 
   let printerUrl = getDirectPrinterUrl();
   if (Platform.OS === 'ios' && !printerUrl && settings.directPrint) {
-    const paired = await pairDirectPrinter();
-    if (paired) {
-      printerUrl = paired.url;
+    try {
+      const paired = await pairDirectPrinter();
+      if (paired) {
+        printerUrl = paired.url;
+      }
+    } catch {}
+  }
+
+  await universalPrintHtml(testHtml, {
+    width: is58mm ? 164 : 226,
+    printerUrl: printerUrl || undefined,
+  });
+}
+
+/**
+ * Generates clean thermal HTML voucher for an expense record
+ */
+export function generateExpenseVoucherHtml(expense: ExpenseRecord): string {
+  const settings = getPrinterSettings();
+  const company = getCompanyProfile();
+  const is58mm = settings.paperSize === '58mm';
+  const scale = settings.fontScale || 1.0;
+  const voucherCode = expense.expense_code || `EXP-${expense.id.slice(0, 8).toUpperCase()}`;
+  const expenseDate = expense.expense_date
+    ? new Date(expense.expense_date).toLocaleString('en-IN')
+    : new Date().toLocaleString('en-IN');
+  const amountFormatted = Number(expense.amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+  });
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Voucher - ${voucherCode}</title>
+      <style>
+        @page { margin: 0; size: ${is58mm ? '58mm' : '80mm'} auto; }
+        body {
+          font-family: 'Courier New', Courier, monospace, sans-serif;
+          font-size: ${(11 * scale).toFixed(1)}px;
+          line-height: 1.35;
+          margin: 0;
+          padding: 8px 6px;
+          color: #000;
+          background: #fff;
+          width: ${is58mm ? '48mm' : '72mm'};
+        }
+        .center { text-align: center; }
+        .bold { font-weight: bold; }
+        .divider { border-top: 1px dashed #000; margin: 5px 0; }
+        .double-divider { border-top: 2px solid #000; margin: 6px 0; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: ${(10.5 * scale).toFixed(1)}px; }
+        .box { border: 1.5px solid #000; padding: 4px; text-align: center; margin: 6px 0; font-size: ${(11 * scale).toFixed(1)}px; }
+      </style>
+    </head>
+    <body>
+      <div class="center bold" style="font-size: ${(14 * scale).toFixed(1)}px;">
+        ${company.company_name || 'SOFTAIR SOLUTIONS PVTLTD'}
+      </div>
+      ${company.address ? `<div class="center" style="font-size: ${(10 * scale).toFixed(1)}px;">${company.address}</div>` : ''}
+      ${company.phone ? `<div class="center" style="font-size: ${(10 * scale).toFixed(1)}px;">Tel: ${company.phone}</div>` : ''}
+
+      <div class="box bold">
+        [ EXPENSE CASH VOUCHER ]
+      </div>
+
+      <div class="row">
+        <span>VOUCHER NO:</span>
+        <span class="bold">${voucherCode}</span>
+      </div>
+      <div class="row">
+        <span>DATE:</span>
+        <span>${expenseDate}</span>
+      </div>
+      <div class="row">
+        <span>STAFF:</span>
+        <span class="bold">${expense.salesman_name || 'Sales Representative'}</span>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="row">
+        <span>CATEGORY:</span>
+        <span class="bold">${expense.category}</span>
+      </div>
+      <div class="row">
+        <span>PAYMENT MODE:</span>
+        <span>${expense.payment_mode || 'Cash'}</span>
+      </div>
+
+      ${expense.reason ? `
+        <div class="divider"></div>
+        <div class="bold">PARTICULARS / REASON:</div>
+        <div style="word-break: break-word; font-size: ${(10 * scale).toFixed(1)}px;">${expense.reason}</div>
+      ` : ''}
+
+      <div class="double-divider"></div>
+
+      <div class="row bold" style="font-size: ${(13 * scale).toFixed(1)}px;">
+        <span>VOUCHER TOTAL:</span>
+        <span>Rs. ${amountFormatted}</span>
+      </div>
+
+      <div class="double-divider"></div>
+
+      <div class="center bold" style="font-size: ${(10 * scale).toFixed(1)}px; margin: 4px 0;">
+        [ CASH DISBURSED & RECONCILED ]
+      </div>
+
+      <div style="margin-top: 25px;" class="row">
+        <span>Prepared By: ____________</span>
+        <span>Receiver Sign: ____________</span>
+      </div>
+
+      <div class="center" style="margin-top: 15px; font-size: ${(9 * scale).toFixed(1)}px;">
+        *** OFFICIAL ACCOUNTS VOUCHER ***
+      </div>
+      ${'<br/>'.repeat(settings.feedLines || 2)}
+    </body>
+    </html>
+  `;
+}
+
+/**
+ * Universal print handler for expense vouchers across Web, Bluetooth, and System printers
+ */
+export async function printExpenseVoucher(expense: ExpenseRecord): Promise<void> {
+  const settings = getPrinterSettings();
+
+  // Try direct Bluetooth ESC/POS if supported
+  if (isDirectBluetoothSupported()) {
+    try {
+      await ensureOrAutoConnectPrinter();
+      const ok = await printExpenseDirectBluetooth(expense);
+      if (ok) return;
+    } catch (btErr) {
+      console.warn('[printExpenseVoucher] Direct Bluetooth failed, falling back to universal print:', btErr);
     }
   }
 
-  const printOptions: Print.PrintOptions = {
-    html: testHtml,
-    width: is58mm ? 164 : 226,
-  };
-  if (printerUrl) {
-    printOptions.printerUrl = printerUrl;
-  }
+  // Universal print fallback
+  const html = generateExpenseVoucherHtml(expense);
+  const is58mm = settings.paperSize === '58mm';
+  const printerUrl = getDirectPrinterUrl();
 
-  await Print.printAsync(printOptions);
+  await universalPrintHtml(html, {
+    width: is58mm ? 164 : 226,
+    printerUrl: printerUrl || undefined,
+  });
 }

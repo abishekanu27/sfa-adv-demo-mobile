@@ -12,6 +12,7 @@ import {
   isPrintAborted,
   ensureOrAutoConnectPrinter,
 } from './printerSettingsService';
+import { universalPrintHtml } from './printHelper';
 
 export type ReportType =
   | 'collections'
@@ -401,53 +402,24 @@ export async function printReportDocument(options: ReportPrintOptions, paperWidt
   const printerSettings = getPrinterSettings();
   const chosenWidth: ThermalWidth = paperWidth || options.paperWidth || (printerSettings.paperSize === '58mm' ? '58mm' : '80mm');
 
-  // On Android: Direct In-App Bluetooth ESC/POS printing matching Invoices and Orders
-  if (Platform.OS === 'android') {
-    if (!isDirectBluetoothSupported()) {
-      throw new Error('Direct In-App Bluetooth printing is supported in the installed Android APK build. Please install the APK preview build to print directly without external apps.');
+  // Direct In-App Bluetooth ESC/POS printing for native APK builds with paired printer
+  if (isDirectBluetoothSupported()) {
+    try {
+      await ensureOrAutoConnectPrinter();
+      const ok = await printReportDirectBluetooth(options, chosenWidth);
+      if (ok) return;
+    } catch (btErr) {
+      console.warn('[printReportDocument] Direct Bluetooth print failed or offline, falling back to universal print:', btErr);
     }
-    await ensureOrAutoConnectPrinter();
-    await printReportDirectBluetooth(options, chosenWidth);
-    return;
-  }
-
-  // Direct In-App Bluetooth ESC/POS printing for other platforms if address configured
-  if (
-    printerSettings.printerAddress &&
-    isDirectBluetoothSupported()
-  ) {
-    await printReportDirectBluetooth(options, chosenWidth);
-    return;
   }
 
   const html = generateReportHtml({ ...options, paperWidth: chosenWidth });
   const printerUrl = getDirectPrinterUrl();
 
-  const printOptions: Print.PrintOptions = {
-    html,
+  await universalPrintHtml(html, {
     width: chosenWidth === '58mm' ? 164 : 226,
-  };
-  if (printerUrl) {
-    printOptions.printerUrl = printerUrl;
-  }
-
-  try {
-    await Print.printAsync(printOptions);
-  } catch (e: any) {
-    const msg = (e?.message || e?.reason || e?.toString() || '').toLowerCase();
-    if (
-      msg.includes('complete') ||
-      msg.includes('incomplete') ||
-      msg.includes('cancel') ||
-      msg.includes('dismiss') ||
-      msg.includes('abort') ||
-      msg.includes('picker')
-    ) {
-      // User cancelled print dialog
-      return;
-    }
-    throw e;
-  }
+    printerUrl: printerUrl || undefined,
+  });
 }
 
 /**

@@ -25,7 +25,7 @@ import { syncDatabase } from '../database/sync';
 import { triggerImmediateSync, addAutoSyncListener } from '../services/autoSyncService';
 import { useAuth } from '../context/AuthContext';
 import {
-  printExpenseDirectBluetooth,
+  printExpenseVoucher,
   abortActivePrint,
 } from '../services/printerSettingsService';
 
@@ -142,7 +142,7 @@ export default function ExpensesScreen() {
     setIsPrintingVoucher(true);
     setPrintingExpenseId(exp.id);
     try {
-      await printExpenseDirectBluetooth(exp);
+      await printExpenseVoucher(exp);
       Alert.alert('Printed', 'Expense voucher printed successfully.');
     } catch (e: any) {
       if (!e?.message?.includes('cancelled') && !e?.message?.includes('stopped')) {
@@ -206,7 +206,7 @@ export default function ExpensesScreen() {
         setIsPrintingVoucher(true);
         setPrintingExpenseId(savedExp.id);
         try {
-          await printExpenseDirectBluetooth(savedExp);
+          await printExpenseVoucher(savedExp);
           Alert.alert(
             'Expense Recorded & Printed',
             `₹${numAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} deducted and voucher printed.`

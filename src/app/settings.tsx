@@ -211,13 +211,12 @@ export default function SettingsScreen() {
             </View>
             <View>
               <Text style={styles.cardTitle}>Bluetooth Thermal Printer</Text>
-              <Text style={styles.cardSubtitle}>Direct ESC/POS • Posiflow PSF310 & Van Printers</Text>
             </View>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: isConnected ? '#dcfce7' : '#f1f5f9' }]}>
             <View style={[styles.statusDot, { backgroundColor: isConnected ? '#16a34a' : '#94a3b8' }]} />
             <Text style={[styles.statusText, { color: isConnected ? '#15803d' : '#64748b' }]}>
-              {isConnected ? 'CONNECTED' : 'DISCONNECTED'}
+              {isConnected ? 'CONNECTED' : ''}
             </Text>
           </View>
         </View>
@@ -229,14 +228,11 @@ export default function SettingsScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <Text style={styles.deviceName} numberOfLines={1}>{settings.printerName}</Text>
                   <View style={styles.directPill}>
-                    <Text style={styles.directPillText}>⚡ Direct ESC/POS</Text>
+                    <Text style={styles.directPillText}> Direct ESC/POS</Text>
                   </View>
                 </View>
                 <Text style={styles.deviceMeta}>
                   {settings.printerAddress ? `MAC: ${formatDisplayMacAddress(settings.printerAddress)}` : 'Paired Device'} • Roll: {settings.paperSize || '80mm'}
-                </Text>
-                <Text style={styles.watermarkFreeText}>
-                  ✓ 100% Watermark-Free • No RawBT or external apps required
                 </Text>
               </View>
             </View>
@@ -254,6 +250,21 @@ export default function SettingsScreen() {
                   <>
                     <MaterialIcons name="network-check" size={16} color="#059669" />
                     <Text style={styles.testLinkButtonText}>Test Link</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleDiagnosticTest}
+                disabled={isPrintingDiag}
+                style={[styles.testLinkButton, { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }]}
+                activeOpacity={0.7}
+              >
+                {isPrintingDiag ? (
+                  <ActivityIndicator size="small" color="#2563eb" />
+                ) : (
+                  <>
+                    <MaterialIcons name="print" size={16} color="#2563eb" />
+                    <Text style={[styles.testLinkButtonText, { color: '#1d4ed8' }]}>Test Print</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -279,24 +290,38 @@ export default function SettingsScreen() {
         ) : (
           <View style={styles.disconnectedCard}>
             <Text style={styles.disconnectedNotice}>No Bluetooth printer currently connected.</Text>
-            <Text style={styles.disconnectedSubnotice}>
-              Connect any Bluetooth thermal receipt printer (58mm or 80mm) to print orders, invoices, and vouchers directly.
-            </Text>
-            <TouchableOpacity
-              onPress={handleOpenPicker}
-              disabled={isPairing || isScanning}
-              style={styles.connectButton}
-              activeOpacity={0.8}
-            >
-              {isScanning || isPairing ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <>
-                  <MaterialIcons name="bluetooth-searching" size={18} color="#ffffff" />
-                  <Text style={styles.connectButtonText}>Connect Bluetooth Printer</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <TouchableOpacity
+                onPress={handleOpenPicker}
+                disabled={isPairing || isScanning}
+                style={[styles.connectButton, { flex: 1, marginTop: 0 }]}
+                activeOpacity={0.8}
+              >
+                {isScanning || isPairing ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <MaterialIcons name="bluetooth-searching" size={18} color="#ffffff" />
+                    <Text style={styles.connectButtonText}>Connect Bluetooth</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleDiagnosticTest}
+                disabled={isPrintingDiag}
+                style={[styles.connectButton, { flex: 1, marginTop: 0, backgroundColor: '#0284c7' }]}
+                activeOpacity={0.8}
+              >
+                {isPrintingDiag ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <MaterialIcons name="print" size={18} color="#ffffff" />
+                    <Text style={styles.connectButtonText}>Test Print</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         )}
         </View>
@@ -318,7 +343,7 @@ export default function SettingsScreen() {
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.modalTitle}>Connect Bluetooth Printer</Text>
-                <Text style={styles.modalSubtitle}>Search & connect any 80mm or 58mm thermal printer</Text>
+                <Text style={styles.modalSubtitle}>Search & connect 80mm thermal printer</Text>
               </View>
               <TouchableOpacity
                 onPress={() => setIsPickerVisible(false)}
