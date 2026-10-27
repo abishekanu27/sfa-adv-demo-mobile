@@ -60,7 +60,7 @@ function getThermalPrinter(): any {
   }
 }
 import { getCompanyLogo } from '../utils/companyBranding';
-import { getPrinterSettings, savePrinterSettings } from './printerSettingsService';
+import { getPrinterSettings, savePrinterSettings } from './printerConfig';
 import type { MobileInvoiceData } from './invoiceService';
 import type { ReportPrintOptions } from './reportPrintService';
 

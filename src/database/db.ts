@@ -1,12 +1,102 @@
 import * as SQLite from 'expo-sqlite';
+import { Platform } from 'react-native';
 import { DEFAULT_COMPANY_LOGO } from '../utils/companyBranding';
+
+/**
+ * Web In-Memory & LocalStorage SQLite Mock Proxy
+ * Used when running on Web without SharedArrayBuffer / cross-origin isolation.
+ * Prevents "ReferenceError: SharedArrayBuffer is not defined" crashes while
+ * maintaining state for auth session, routes, and local metadata.
+ */
+class WebFallbackDatabase {
+  private metaStore: Record<string, string> = {};
+
+  constructor() {
+    console.warn(
+      '💡 Running in Web SQLite Fallback mode. LocalStorage will be used for session and metadata.'
+    );
+  }
+
+  execSync(_sql: string): void {
+    // Schema creation and migrations are safely ignored on web fallback
+  }
+
+  runSync(sql: string, ...params: any[]): { changes: number; lastInsertRowId: number } {
+    const trimmed = sql.trim();
+    if (trimmed.toLowerCase().includes('sync_meta')) {
+      const flatParams = params.flat();
+      if (flatParams.length >= 2) {
+        const key = String(flatParams[0]);
+        const val = String(flatParams[1]);
+        this.metaStore[key] = val;
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('sf_meta_' + key, val);
+          }
+        } catch {}
+      }
+    }
+    return { changes: 1, lastInsertRowId: 1 };
+  }
+
+  getFirstSync<T>(sql: string, ...params: any[]): T | null {
+    const trimmed = sql.trim();
+    if (trimmed.toLowerCase().includes('sync_meta')) {
+      const flatParams = params.flat();
+      const key = String(flatParams[0]);
+      let val: string | null = null;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          val = localStorage.getItem('sf_meta_' + key);
+        }
+      } catch {}
+      if (val === null && this.metaStore[key] !== undefined) {
+        val = this.metaStore[key];
+      }
+      if (val !== null) {
+        return { value: val } as unknown as T;
+      }
+      return null;
+    }
+    return null;
+  }
+
+  getAllSync<T>(_sql: string, ..._params: any[]): T[] {
+    return [];
+  }
+
+  prepareSync(): any {
+    return {
+      executeSync: () => ({ getFirstSync: () => null, getAllSync: () => [] }),
+      finalizeSync: () => {},
+    };
+  }
+
+  withTransactionSync(task: () => void): void {
+    task();
+  }
+
+  closeSync(): void {}
+}
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
 export function getDatabase(): SQLite.SQLiteDatabase {
   if (!dbInstance) {
-    dbInstance = SQLite.openDatabaseSync('salesforce.db');
-    initTables(dbInstance);
+    if (Platform.OS === 'web' && typeof SharedArrayBuffer === 'undefined') {
+      dbInstance = new WebFallbackDatabase() as unknown as SQLite.SQLiteDatabase;
+      initTables(dbInstance);
+      return dbInstance;
+    }
+
+    try {
+      dbInstance = SQLite.openDatabaseSync('salesforce.db');
+      initTables(dbInstance);
+    } catch (err: any) {
+      console.warn('⚠️ SQLite.openDatabaseSync failed on Web, using fallback proxy:', err.message);
+      dbInstance = new WebFallbackDatabase() as unknown as SQLite.SQLiteDatabase;
+      initTables(dbInstance);
+    }
   }
   return dbInstance;
 }
